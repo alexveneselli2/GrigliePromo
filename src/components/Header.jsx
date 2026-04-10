@@ -1,6 +1,6 @@
 import PROMOZIONI from '../data/promozioni';
 
-export default function Header({ selectedPromoIdx, onPromoChange }) {
+export default function Header({ selectedPromoIdx, onPromoChange, view, onViewChange }) {
   const promo = PROMOZIONI[selectedPromoIdx];
 
   return (
@@ -52,12 +52,32 @@ export default function Header({ selectedPromoIdx, onPromoChange }) {
               {promo.tot_prod} ref.
             </span>
           )}
-          {promo.temi_nofood && (
-            <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 font-medium truncate max-w-[200px]" title={promo.temi_nofood}>
-              {promo.temi_nofood}
-            </span>
-          )}
         </div>
+
+        {/* View toggle - top right */}
+        {view && onViewChange && (
+          <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-full p-1 shrink-0">
+            <button
+              onClick={() => onViewChange('v1')}
+              className={`px-3 py-1 text-xs font-semibold rounded-full transition-all ${
+                view === 'v1' ? 'bg-white text-dimar-dark shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
+              }`}
+            >
+              Classic
+            </button>
+            <button
+              onClick={() => onViewChange('v2')}
+              className={`px-3 py-1 text-xs font-semibold rounded-full transition-all flex items-center gap-1 ${
+                view === 'v2' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
+              }`}
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Nuova UI
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Promo detail bar */}

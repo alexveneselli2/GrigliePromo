@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import V2BudgetPanel from './V2BudgetPanel';
 import V2FamilyCard from './V2FamilyCard';
 import V2FiltersBar from './V2FiltersBar';
+import V2RepartoHeader from './V2RepartoHeader';
 
 export default function V2View({ gridState, selectedPromo }) {
   const {
@@ -96,47 +97,17 @@ export default function V2View({ gridState, selectedPromo }) {
           {displayGroups.map(group => {
             const isCollapsed = collapsedReparti[group.code];
             const budget = repartoBudgets.find(r => r.code === group.code);
-            const assignedCount = group.families.filter(f => {
-              const row = selections[f.fc] || {};
-              return Object.values(row).some(v => v);
-            }).length;
 
             return (
               <section key={group.code} className="mb-4">
-                {/* Reparto header (dropdown-style) */}
-                <button
-                  onClick={() => toggleReparto(group.code)}
-                  className="w-full text-left flex items-center gap-3 py-3 px-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-indigo-200 transition-all group"
-                >
-                  <svg
-                    className={`w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 group-hover:text-indigo-600 ${
-                      isCollapsed ? '' : 'rotate-90'
-                    }`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                  </svg>
-                  <div className="w-1 h-6 bg-gradient-to-b from-dimar-red to-indigo-600 rounded-full shrink-0" />
-                  <h3 className="text-base font-bold text-dimar-dark">{group.name}</h3>
-                  <span className="text-xs text-gray-400">{group.families.length} famiglie</span>
-                  {assignedCount > 0 && (
-                    <span className="px-2 py-0.5 bg-dimar-red/10 text-dimar-red text-[10px] font-bold rounded-full">
-                      {assignedCount} assegnate
-                    </span>
-                  )}
-                  <div className="ml-auto flex items-center gap-3 text-xs">
-                    <span className="text-gray-500">
-                      Vol. <strong className="text-dimar-red">{budget?.usedVol || 0}</strong>
-                      <span className="text-gray-400">/{group.budget_vol}</span>
-                    </span>
-                    {group.budget_aff > 0 && (
-                      <span className="text-gray-500">
-                        Aff. <strong className="text-blue-600">{budget?.usedAff || 0}</strong>
-                        <span className="text-gray-400">/{group.budget_aff}</span>
-                      </span>
-                    )}
-                  </div>
-                </button>
+                <V2RepartoHeader
+                  group={group}
+                  isCollapsed={isCollapsed}
+                  onToggle={() => toggleReparto(group.code)}
+                  budget={budget}
+                  selections={selections}
+                  getRowTotals={getRowTotals}
+                />
 
                 {/* Family cards grid (collapsible content) */}
                 {!isCollapsed && (

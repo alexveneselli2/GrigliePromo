@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import V2BudgetPanel from './V2BudgetPanel';
 import V2FamilyCard from './V2FamilyCard';
 import V2FiltersBar from './V2FiltersBar';
@@ -20,6 +20,29 @@ export default function V2View({ gridState, selectedPromo }) {
 
   const [sortBy, setSortBy] = useState('default'); // default | vendite | margine | assigned
   const [showOnlyAssigned, setShowOnlyAssigned] = useState(false);
+  const [expandedFamilies, setExpandedFamilies] = useState({}); // {fc: true}
+
+  const toggleExpand = useCallback((fc) => {
+    setExpandedFamilies(prev => ({ ...prev, [fc]: !prev[fc] }));
+  }, []);
+
+  const expandAll = useCallback(() => {
+    const all = {};
+    for (const g of filteredGroups) {
+      for (const f of g.families) all[f.fc] = true;
+    }
+    setExpandedFamilies(all);
+  }, [filteredGroups]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedFamilies({});
+  }, []);
+
+  const allExpanded = useMemo(() => {
+    const total = filteredGroups.reduce((acc, g) => acc + g.families.length, 0);
+    const expandedCount = Object.values(expandedFamilies).filter(Boolean).length;
+    return total > 0 && expandedCount >= total;
+  }, [filteredGroups, expandedFamilies]);
 
   // Flatten & sort families
   const displayGroups = useMemo(() => {
@@ -60,6 +83,9 @@ export default function V2View({ gridState, selectedPromo }) {
           onSortChange={setSortBy}
           showOnlyAssigned={showOnlyAssigned}
           onShowOnlyAssignedChange={setShowOnlyAssigned}
+          allExpanded={allExpanded}
+          onExpandAll={expandAll}
+          onCollapseAll={collapseAll}
         />
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -93,8 +119,8 @@ export default function V2View({ gridState, selectedPromo }) {
                 </div>
               </div>
 
-              {/* Family cards grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+              {/* Family cards list */}
+              <div className="flex flex-col gap-2">
                 {group.families.map(f => (
                   <V2FamilyCard
                     key={f.fc}
@@ -103,6 +129,8 @@ export default function V2View({ gridState, selectedPromo }) {
                     selections={selections[f.fc] || {}}
                     onToggle={(col) => toggleCell(f.fc, col)}
                     totals={getRowTotals(f.fc)}
+                    expanded={!!expandedFamilies[f.fc]}
+                    onToggleExpand={() => toggleExpand(f.fc)}
                   />
                 ))}
               </div>

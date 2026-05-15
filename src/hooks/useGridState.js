@@ -49,31 +49,76 @@ const SECTION_TO_SPAZI_KEY = {
   s4: 'Speciale4_Affiancamento',
 };
 
+// Synthetic-budget ratios: when the Excel data has no explicit allocation
+// for a non-Tema section, we estimate the budget as a fraction of the Tema
+// budget for that same reparto. Allows the AI to propose assignments across
+// all sections defined in the promo metadata, not only Tema.
+const SYNTHETIC_BUDGET_RATIOS = {
+  sotto: 0.30,
+  s1: 0.45,
+  s2: 0.30,
+  s3: 0.25,
+  s4: 0.20,
+};
+
 // Get budget for (promo, sezione, anagrafica reparto code)
+// Returns { prod, card, synthetic } — `synthetic: true` when derived from Tema.
 export function getBudgetForRepartoSezione(promoCode, sectionKey, anagRepartoCode) {
   const sezioneSpazi = SECTION_TO_SPAZI_KEY[sectionKey];
-  if (!sezioneSpazi) return { prod: 0, card: 0 };
+  if (!sezioneSpazi) return { prod: 0, card: 0, synthetic: false };
   const promoSpazi = SPAZI[promoCode];
-  if (!promoSpazi) return { prod: 0, card: 0 };
-  const sez = promoSpazi[sezioneSpazi];
-  if (!sez) return { prod: 0, card: 0 };
+  if (!promoSpazi) return { prod: 0, card: 0, synthetic: false };
 
   const mappedReparti = REPARTO_TO_SPAZI[anagRepartoCode] || [];
-  let prod = 0, card = 0;
-  for (const r of mappedReparti) {
-    const v = sez.byReparto[r];
-    if (v) { prod += v.prod || 0; card += v.card || 0; }
+
+  // 1. Try the real Excel data for this section
+  const sez = promoSpazi[sezioneSpazi];
+  if (sez) {
+    let prod = 0, card = 0;
+    for (const r of mappedReparti) {
+      const v = sez.byReparto[r];
+      if (v) { prod += v.prod || 0; card += v.card || 0; }
+    }
+    if (prod > 0 || card > 0) return { prod, card, synthetic: false };
   }
-  return { prod, card };
+
+  // 2. Fallback: synthesise from Tema using a per-section ratio
+  const ratio = SYNTHETIC_BUDGET_RATIOS[sectionKey];
+  if (!ratio) return { prod: 0, card: 0, synthetic: false };
+  const temaSez = promoSpazi['Tema'];
+  if (!temaSez) return { prod: 0, card: 0, synthetic: false };
+  let temaProd = 0, temaCard = 0;
+  for (const r of mappedReparti) {
+    const v = temaSez.byReparto[r];
+    if (v) { temaProd += v.prod || 0; temaCard += v.card || 0; }
+  }
+  if (temaProd === 0) return { prod: 0, card: 0, synthetic: false };
+  return {
+    prod: Math.max(1, Math.round(temaProd * ratio)),
+    card: Math.max(0, Math.round(temaCard * ratio)),
+    synthetic: true,
+  };
 }
 
-// Promo total budget per sezione
+// Promo total budget per sezione (sum of all reparti, real + synthetic)
 export function getPromoTotalBudget(promoCode, sectionKey) {
   const sezioneSpazi = SECTION_TO_SPAZI_KEY[sectionKey];
   if (!sezioneSpazi) return { prod: 0, card: 0, pag: 0 };
   const sez = SPAZI[promoCode]?.[sezioneSpazi];
-  if (!sez) return { prod: 0, card: 0, pag: 0 };
-  return { prod: sez.prod, card: sez.card, pag: sez.pag };
+  if (sez && (sez.prod > 0 || sez.card > 0)) {
+    return { prod: sez.prod, card: sez.card, pag: sez.pag, synthetic: false };
+  }
+  // Synthetic: aggregate per-reparto synthetic budgets
+  const ratio = SYNTHETIC_BUDGET_RATIOS[sectionKey];
+  if (!ratio) return { prod: 0, card: 0, pag: 0, synthetic: false };
+  const temaSez = SPAZI[promoCode]?.['Tema'];
+  if (!temaSez) return { prod: 0, card: 0, pag: 0, synthetic: false };
+  return {
+    prod: Math.round(temaSez.prod * ratio),
+    card: Math.round(temaSez.card * ratio),
+    pag: Math.round((temaSez.pag || 0) * ratio),
+    synthetic: true,
+  };
 }
 
 export default function useGridState(selectedPromo) {

@@ -44,6 +44,64 @@ function ThinkingAnimation({ done }) {
   );
 }
 
+const SECTION_GRADIENTS = {
+  red: 'from-dimar-red to-rose-500',
+  orange: 'from-orange-600 to-orange-400',
+  amber: 'from-amber-600 to-amber-400',
+  green: 'from-emerald-600 to-emerald-400',
+  teal: 'from-teal-600 to-teal-400',
+  blue: 'from-blue-600 to-blue-400',
+};
+const SECTION_RING = {
+  red: 'ring-dimar-red/40',
+  orange: 'ring-orange-500/40',
+  amber: 'ring-amber-500/40',
+  green: 'ring-emerald-500/40',
+  teal: 'ring-teal-500/40',
+  blue: 'ring-blue-500/40',
+};
+
+function SectionChip({ label, count, slots, color, isActive, onClick }) {
+  const gradient = color ? SECTION_GRADIENTS[color] : 'from-gray-700 to-gray-500';
+  const ring = color ? SECTION_RING[color] : 'ring-gray-300';
+  return (
+    <button
+      onClick={onClick}
+      className={`group inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full border text-xs font-semibold transition-all ${
+        isActive
+          ? `bg-gradient-to-r ${gradient} text-white border-transparent shadow-sm ring-2 ${ring}`
+          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+      }`}
+    >
+      {color && (
+        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white/80' : `bg-gradient-to-r ${gradient}`}`} />
+      )}
+      <span>{label}</span>
+      <span className={`text-[10px] tabular-nums font-bold px-1.5 py-0.5 rounded-full ${
+        isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
+      }`}>
+        {count}{slots != null && slots !== count ? `·${slots}sl` : ''}
+      </span>
+    </button>
+  );
+}
+
+function GroupHeader({ label, color, count, slots, groupBy }) {
+  const gradient = color ? SECTION_GRADIENTS[color] : 'from-gray-700 to-gray-500';
+  return (
+    <div className="flex items-center gap-2 mb-2 pb-1.5 border-b-2 border-gray-100">
+      <div className={`w-1 h-5 rounded-full ${color ? `bg-gradient-to-b ${gradient}` : 'bg-gray-400'}`} />
+      <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
+        {groupBy === 'section' ? 'Sezione' : 'Reparto'}
+      </span>
+      <h4 className="text-sm font-bold text-dimar-dark">{label}</h4>
+      <span className="text-[10px] text-gray-400">
+        {count} {count === 1 ? 'proposta' : 'proposte'}{slots != null && slots !== count ? ` · ${slots} slot` : ''}
+      </span>
+    </div>
+  );
+}
+
 function PromoTab({ promo, count, accepted, rejected, isActive, onClick }) {
   const decided = accepted + rejected;
   const ratio = count > 0 ? decided / count : 0;
@@ -112,6 +170,8 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
   const [plan, setPlan] = useState(null);
   const [activePromo, setActivePromo] = useState(null);
   const [filterMode, setFilterMode] = useState('all'); // all | warnings | high-conf | low-conf | pending
+  const [activeSection, setActiveSection] = useState('all'); // section key filter
+  const [groupBy, setGroupBy] = useState('section'); // 'section' | 'reparto' | 'none'
   const [tab, setTab] = useState('plan');
   // accepted[promoCode][`${fc}::${sectionKey}`] = true | false
   const [accepted, setAccepted] = useState({});
@@ -197,11 +257,40 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     return { total, accepted: acc, rejected: rej, slots };
   }, [statsByPromo]);
 
+  // Sections present in the active promo's suggestions, with counts
+  const sectionsForActivePromo = useMemo(() => {
+    if (!plan?.richByPromo[activePromo]) return [];
+    const sugs = plan.richByPromo[activePromo];
+    const order = ['tema', 'sotto', 's1', 's2', 's3', 's4'];
+    const map = {};
+    for (const s of sugs) {
+      if (!map[s.sectionKey]) {
+        map[s.sectionKey] = {
+          key: s.sectionKey,
+          short: s.sectionShort,
+          label: s.sectionLabel,
+          color: s.sectionColor,
+          total: 0,
+          totalSlots: 0,
+        };
+      }
+      map[s.sectionKey].total += 1;
+      map[s.sectionKey].totalSlots += s.prodCount || 1;
+    }
+    return order.filter(k => map[k]).map(k => map[k]);
+  }, [plan, activePromo]);
+
+  // Reset section filter when changing promo
+  useEffect(() => {
+    setActiveSection('all');
+  }, [activePromo]);
+
   const filteredSuggestions = useMemo(() => {
     if (!plan?.richByPromo[activePromo]) return [];
     const sugs = plan.richByPromo[activePromo];
     const acc = accepted[activePromo] || {};
     return sugs.filter(s => {
+      if (activeSection !== 'all' && s.sectionKey !== activeSection) return false;
       const v = acc[`${s.fc}::${s.sectionKey}`];
       if (filterMode === 'pending') return v === undefined || v === null;
       if (filterMode === 'warnings') return s.warnings.length > 0;
@@ -209,7 +298,38 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
       if (filterMode === 'low-conf') return s.confidence < 0.55;
       return true;
     });
-  }, [plan, activePromo, accepted, filterMode]);
+  }, [plan, activePromo, accepted, filterMode, activeSection]);
+
+  // Grouped suggestions for rendering
+  const groupedSuggestions = useMemo(() => {
+    if (groupBy === 'none') {
+      return [{ key: 'all', label: null, items: filteredSuggestions }];
+    }
+    const groups = {};
+    const order = [];
+    for (const s of filteredSuggestions) {
+      let key, label, color;
+      if (groupBy === 'section') {
+        key = s.sectionKey;
+        label = s.sectionShort;
+        color = s.sectionColor;
+      } else {
+        key = s.repartoCode;
+        label = s.family.rn;
+      }
+      if (!groups[key]) {
+        groups[key] = { key, label, color, items: [] };
+        order.push(key);
+      }
+      groups[key].items.push(s);
+    }
+    // Custom ordering when grouping by section
+    if (groupBy === 'section') {
+      const sectionOrder = ['tema', 'sotto', 's1', 's2', 's3', 's4'];
+      order.sort((a, b) => sectionOrder.indexOf(a) - sectionOrder.indexOf(b));
+    }
+    return order.map(k => groups[k]);
+  }, [filteredSuggestions, groupBy]);
 
   const applyAccepted = () => {
     if (!plan) return;
@@ -331,46 +451,33 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
                       </div>
                     </div>
 
-                    {/* Promo toolbar */}
+                    {/* Promo toolbar (top) */}
                     {activePromo && (
-                      <div className="px-5 py-3 border-b border-gray-100 bg-white flex items-center gap-3 flex-wrap">
-                        <div>
-                          <div className="text-xs text-gray-500">
-                            Suggerimenti per <strong className="text-dimar-dark">{activePromo}</strong>
+                      <div className="px-5 py-3 border-b border-gray-100 bg-white">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <div>
+                            <div className="text-xs text-gray-500">
+                              Suggerimenti per <strong className="text-dimar-dark">{activePromo}</strong>
+                            </div>
+                            <div className="text-[10px] text-gray-400">
+                              {filteredSuggestions.length} di {plan.richByPromo[activePromo]?.length || 0} visibili
+                              {' · '}
+                              <span className="text-emerald-600 font-semibold">
+                                {statsByPromo[activePromo]?.accepted || 0} accettati
+                              </span>
+                              {' · '}
+                              <span className="text-red-500 font-semibold">
+                                {statsByPromo[activePromo]?.rejected || 0} rifiutati
+                              </span>
+                            </div>
                           </div>
-                          <div className="text-[10px] text-gray-400">
-                            {filteredSuggestions.length} su {plan.richByPromo[activePromo]?.length || 0} mostrati
-                            {' · '}
-                            <span className="text-emerald-600 font-semibold">
-                              {statsByPromo[activePromo]?.accepted || 0} accettati
-                            </span>
-                            {' · '}
-                            <span className="text-red-500 font-semibold">
-                              {statsByPromo[activePromo]?.rejected || 0} rifiutati
-                            </span>
-                          </div>
-                        </div>
 
-                        <select
-                          value={filterMode}
-                          onChange={e => setFilterMode(e.target.value)}
-                          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white cursor-pointer"
-                        >
-                          <option value="all">Tutti</option>
-                          <option value="warnings">Solo con avvisi</option>
-                          <option value="high-conf">Alta confidenza (≥80%)</option>
-                          <option value="low-conf">Bassa confidenza (&lt;55%)</option>
-                          <option value="pending">Da decidere</option>
-                        </select>
-
-                        <button
-                          onClick={() => onSelectPromo(activePromo)}
-                          className="px-2.5 py-1.5 text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
-                        >
-                          Apri griglia
-                        </button>
-
-                        <div className="ml-auto flex items-center gap-2">
+                          <button
+                            onClick={() => onSelectPromo(activePromo)}
+                            className="ml-auto px-2.5 py-1.5 text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
+                          >
+                            Apri griglia
+                          </button>
                           <button
                             onClick={() => acceptAllInPromo(activePromo)}
                             className="px-2.5 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50"
@@ -384,28 +491,105 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
                             ✗ Rifiuta tutti
                           </button>
                         </div>
+
+                        {/* Section navigation chips */}
+                        {sectionsForActivePromo.length > 0 && (
+                          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+                            <SectionChip
+                              label="Tutte"
+                              count={plan.richByPromo[activePromo]?.length || 0}
+                              isActive={activeSection === 'all'}
+                              onClick={() => setActiveSection('all')}
+                            />
+                            {sectionsForActivePromo.map(sec => (
+                              <SectionChip
+                                key={sec.key}
+                                label={sec.short}
+                                count={sec.total}
+                                slots={sec.totalSlots}
+                                color={sec.color}
+                                isActive={activeSection === sec.key}
+                                onClick={() => setActiveSection(sec.key)}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Secondary filter row: confidence / group-by */}
+                        <div className="flex items-center gap-2 mt-3 text-xs">
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Filtra:</span>
+                          <select
+                            value={filterMode}
+                            onChange={e => setFilterMode(e.target.value)}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white cursor-pointer"
+                          >
+                            <option value="all">Tutti</option>
+                            <option value="warnings">Solo con avvisi</option>
+                            <option value="high-conf">Alta confidenza (≥80%)</option>
+                            <option value="low-conf">Bassa confidenza (&lt;55%)</option>
+                            <option value="pending">Da decidere</option>
+                          </select>
+
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 ml-2">Raggruppa per:</span>
+                          <div className="inline-flex items-center bg-gray-100 rounded-lg p-0.5">
+                            <button
+                              onClick={() => setGroupBy('section')}
+                              className={`px-2 py-0.5 text-[11px] font-semibold rounded ${groupBy === 'section' ? 'bg-white shadow-sm text-violet-700' : 'text-gray-500 hover:text-dimar-dark'}`}
+                            >
+                              Sezione
+                            </button>
+                            <button
+                              onClick={() => setGroupBy('reparto')}
+                              className={`px-2 py-0.5 text-[11px] font-semibold rounded ${groupBy === 'reparto' ? 'bg-white shadow-sm text-violet-700' : 'text-gray-500 hover:text-dimar-dark'}`}
+                            >
+                              Reparto
+                            </button>
+                            <button
+                              onClick={() => setGroupBy('none')}
+                              className={`px-2 py-0.5 text-[11px] font-semibold rounded ${groupBy === 'none' ? 'bg-white shadow-sm text-violet-700' : 'text-gray-500 hover:text-dimar-dark'}`}
+                            >
+                              Nessuno
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
 
-                    {/* Suggestions grid */}
-                    <div className="px-5 py-4 grid grid-cols-1 xl:grid-cols-2 gap-3">
-                      {filteredSuggestions.map(s => {
-                        const key = `${s.fc}::${s.sectionKey}`;
-                        const accVal = accepted[activePromo]?.[key];
-                        return (
-                          <AISuggestionCard
-                            key={`${s.fc}-${s.sectionKey}-${s.repartoCode}`}
-                            suggestion={s}
-                            accepted={accVal}
-                            onToggle={(v) => toggleAccept(activePromo, s.fc, s.sectionKey, v)}
-                          />
-                        );
-                      })}
+                    {/* Suggestions: grouped or flat */}
+                    <div className="px-5 py-4">
                       {filteredSuggestions.length === 0 && (
-                        <div className="col-span-full text-center py-12 text-gray-400 text-sm">
+                        <div className="text-center py-12 text-gray-400 text-sm">
                           Nessun suggerimento corrisponde al filtro corrente
                         </div>
                       )}
+
+                      {groupedSuggestions.map(group => (
+                        <div key={group.key} className="mb-5">
+                          {group.label && (
+                            <GroupHeader
+                              label={group.label}
+                              color={group.color}
+                              count={group.items.length}
+                              slots={group.items.reduce((s, x) => s + (x.prodCount || 1), 0)}
+                              groupBy={groupBy}
+                            />
+                          )}
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                            {group.items.map(s => {
+                              const key = `${s.fc}::${s.sectionKey}`;
+                              const accVal = accepted[activePromo]?.[key];
+                              return (
+                                <AISuggestionCard
+                                  key={`${s.fc}-${s.sectionKey}-${s.repartoCode}`}
+                                  suggestion={s}
+                                  accepted={accVal}
+                                  onToggle={(v) => toggleAccept(activePromo, s.fc, s.sectionKey, v)}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </>

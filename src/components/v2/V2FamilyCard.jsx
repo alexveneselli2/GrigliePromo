@@ -16,40 +16,62 @@ function MiniSparkline({ values }) {
   );
 }
 
-function SlotChip({ label, active, group, onClick }) {
-  const activeColors = {
-    vol: 'bg-dimar-red text-white border-dimar-red shadow-sm shadow-red-200',
-    aff: 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-200',
-  };
-  const inactiveColors = {
-    vol: 'bg-white text-gray-500 border-gray-200 hover:border-dimar-red/50 hover:text-dimar-red',
-    aff: 'bg-white text-gray-500 border-gray-200 hover:border-blue-500/50 hover:text-blue-600',
-  };
+const COLOR_CLASSES = {
+  red:    { activeP: 'bg-dimar-red text-white border-dimar-red',    activeC: 'bg-rose-500 text-white border-rose-500',    accent: 'text-dimar-red',  bar: 'bg-dimar-red' },
+  orange: { activeP: 'bg-orange-600 text-white border-orange-600',  activeC: 'bg-orange-400 text-white border-orange-400', accent: 'text-orange-600', bar: 'bg-orange-600' },
+  amber:  { activeP: 'bg-amber-600 text-white border-amber-600',    activeC: 'bg-amber-400 text-white border-amber-400',   accent: 'text-amber-600',  bar: 'bg-amber-600' },
+  green:  { activeP: 'bg-emerald-600 text-white border-emerald-600', activeC: 'bg-emerald-400 text-white border-emerald-400', accent: 'text-emerald-600', bar: 'bg-emerald-600' },
+  teal:   { activeP: 'bg-teal-600 text-white border-teal-600',      activeC: 'bg-teal-400 text-white border-teal-400',     accent: 'text-teal-600',   bar: 'bg-teal-600' },
+  blue:   { activeP: 'bg-blue-600 text-white border-blue-600',      activeC: 'bg-blue-400 text-white border-blue-400',     accent: 'text-blue-600',   bar: 'bg-blue-600' },
+};
 
-  const shortLabel = label.length > 14 ? label.slice(0, 13) + '…' : label;
+function SectionChips({ section, value, onToggle }) {
+  const cc = COLOR_CLASSES[section.color] || COLOR_CLASSES.red;
+  const pActive = !!value?.p;
+  const cActive = !!value?.c;
 
   return (
-    <button
-      onClick={onClick}
-      title={label}
-      className={`text-[10px] font-semibold px-2 py-1 rounded-full border transition-all duration-150 flex items-center gap-1 ${
-        active ? activeColors[group] : inactiveColors[group]
-      }`}
-    >
-      {active && (
-        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      )}
-      {shortLabel}
-    </button>
+    <div className="flex items-center gap-1">
+      {/* PROD chip */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(section.key, 'p'); }}
+        title={`${section.label} (PROD)`}
+        className={`text-[10px] font-semibold pl-1.5 pr-2 py-1 rounded-l-full border transition-all duration-150 flex items-center gap-1 ${
+          pActive
+            ? `${cc.activeP} shadow-sm`
+            : `bg-white text-gray-500 border-gray-200 hover:${cc.accent}`
+        }`}
+      >
+        {pActive && (
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+        {section.short}
+      </button>
+      {/* CARD chip - smaller, only if PROD active */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(section.key, 'c'); }}
+        disabled={!pActive && !cActive}
+        title={`${section.label} (CARD)`}
+        className={`text-[9px] font-bold w-5 h-[26px] rounded-r-full border-y border-r transition-all duration-150 flex items-center justify-center -ml-1 ${
+          cActive
+            ? `${cc.activeC} shadow-sm`
+            : pActive
+              ? `bg-white text-gray-400 border-gray-200 hover:bg-gray-50`
+              : 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed opacity-50'
+        }`}
+      >
+        C
+      </button>
+    </div>
   );
 }
 
-export default function V2FamilyCard({ family, columns, selections, onToggle, totals }) {
-  const volCols = columns.filter(c => c.group === 'vol');
-  const affCols = columns.filter(c => c.group === 'aff');
-  const isActive = totals.totPromo > 0;
+export default function V2FamilyCard({ family, sections, selections, onToggle, totals }) {
+  const isActive = totals.totSlot > 0;
+  const mainSections = sections.filter(s => s.group !== 'aff');
+  const affSections = sections.filter(s => s.group === 'aff');
 
   return (
     <div
@@ -65,14 +87,16 @@ export default function V2FamilyCard({ family, columns, selections, onToggle, to
           <h4 className="text-sm font-bold text-dimar-dark leading-tight truncate" title={family.fn}>
             {family.fn}
           </h4>
-          <p className="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">{family.rn}</p>
+          <p className="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5 truncate" title={family.sn}>
+            {family.sn}
+          </p>
         </div>
         {isActive && (
           <div className="shrink-0 flex items-center gap-1 px-2 py-0.5 bg-dimar-red text-white rounded-full text-[10px] font-bold">
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
-            {totals.totPromo}
+            {totals.totSlot}
           </div>
         )}
       </div>
@@ -86,7 +110,7 @@ export default function V2FamilyCard({ family, columns, selections, onToggle, to
         <div className="h-3 w-px bg-gray-200" />
         <div className="flex items-baseline gap-1">
           <span className="text-gray-400">M.</span>
-          <span className="font-mono font-semibold text-emerald-600 tabular-nums">{fmtPct(family.m)}</span>
+          <span className="font-mono font-semibold text-emerald-600 tabular-nums">{fmtPct(family.margine)}</span>
         </div>
         <div className="h-3 w-px bg-gray-200" />
         <div className="flex items-baseline gap-1">
@@ -98,64 +122,61 @@ export default function V2FamilyCard({ family, columns, selections, onToggle, to
         </div>
       </div>
 
-      {/* Slot chips - Volantino */}
-      <div className="px-4 pb-2">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <div className="w-1 h-3 bg-dimar-red rounded-full" />
-          <span className="text-[9px] uppercase tracking-wider font-bold text-dimar-red">Volantino</span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {volCols.map(col => (
-            <SlotChip
-              key={col.key}
-              label={col.label}
-              active={!!selections[col.key]}
-              group="vol"
-              onClick={() => onToggle(col.key)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Slot chips - Affiancamento */}
-      {affCols.length > 0 && (
-        <div className="px-4 pb-3 border-t border-gray-50 pt-2 mt-1">
+      {/* Section chips */}
+      {mainSections.length > 0 && (
+        <div className="px-4 pb-2">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <div className="w-1 h-3 bg-blue-600 rounded-full" />
-            <span className="text-[9px] uppercase tracking-wider font-bold text-blue-600">Affiancamento</span>
+            <div className="w-1 h-3 bg-dimar-red rounded-full" />
+            <span className="text-[9px] uppercase tracking-wider font-bold text-dimar-red">Sezioni</span>
           </div>
-          <div className="flex flex-wrap gap-1">
-            {affCols.map(col => (
-              <SlotChip
-                key={col.key}
-                label={col.label}
-                active={!!selections[col.key]}
-                group="aff"
-                onClick={() => onToggle(col.key)}
+          <div className="flex flex-wrap gap-1.5">
+            {mainSections.map(sec => (
+              <SectionChips
+                key={sec.key}
+                section={sec}
+                value={selections[sec.key]}
+                onToggle={onToggle}
               />
             ))}
           </div>
         </div>
       )}
 
-      {/* Footer: history indicators */}
+      {affSections.length > 0 && (
+        <div className="px-4 pb-3 border-t border-gray-50 pt-2 mt-1">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="w-1 h-3 bg-blue-600 rounded-full" />
+            <span className="text-[9px] uppercase tracking-wider font-bold text-blue-600">Affiancamento</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {affSections.map(sec => (
+              <SectionChips
+                key={sec.key}
+                section={sec}
+                value={selections[sec.key]}
+                onToggle={onToggle}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
       <div className="px-4 py-1.5 bg-gray-50/60 flex items-center justify-between text-[10px] text-gray-400 border-t border-gray-50">
         <div className="flex items-center gap-2">
-          {family.storicoVol > 0 && (
-            <span title="Volte in volantino negli ultimi periodi">
-              <span className="font-semibold text-gray-500">{family.storicoVol}</span>× vol
-            </span>
+          {family.nVol > 0 && (
+            <span title="Volte in volantino"><span className="font-semibold text-gray-500">{family.nVol}</span>× vol</span>
           )}
           {family.ultimaPromo && (
-            <span className="truncate max-w-[140px]" title={`Ultima: ${family.ultimaPromo}`}>
+            <span className="truncate max-w-[160px]" title={`Ultima: ${family.ultimaPromo}`}>
               Ultima: {family.ultimaPromo}
             </span>
           )}
         </div>
         {isActive && (
           <div className="flex gap-1.5 font-mono">
-            {totals.totVol > 0 && <span className="text-dimar-red font-bold">V{totals.totVol}</span>}
-            {totals.totAff > 0 && <span className="text-blue-600 font-bold">A{totals.totAff}</span>}
+            {totals.totProd > 0 && <span className="text-dimar-red font-bold">P{totals.totProd}</span>}
+            {totals.totCard > 0 && <span className="text-rose-500 font-bold">C{totals.totCard}</span>}
           </div>
         )}
       </div>

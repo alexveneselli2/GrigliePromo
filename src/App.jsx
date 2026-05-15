@@ -1,88 +1,73 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import PROMOZIONI from './data/promozioni';
 import Header from './components/Header';
-import BudgetDashboard from './components/BudgetDashboard';
-import GridFilters from './components/GridFilters';
-import PromoGrid from './components/PromoGrid';
-import AISuggestions from './components/AISuggestions';
 import V2View from './components/v2/V2View';
+import AIPlanPanel from './components/ai/AIPlanPanel';
+import V1View from './components/v1/V1View';
 import useGridState from './hooks/useGridState';
 
 export default function App() {
-  const [selectedPromoIdx, setSelectedPromoIdx] = useState(0);
-  const [view, setView] = useState('v1'); // 'v1' | 'v2'
-  const selectedPromo = PROMOZIONI[selectedPromoIdx];
+  const [selectedChannel, setSelectedChannel] = useState('Ipermercati');
+  const [selectedPromoCode, setSelectedPromoCode] = useState(null);
+  const [view, setView] = useState('v2');
+  const [aiOpen, setAIOpen] = useState(false);
+
+  const channelPromos = useMemo(
+    () => PROMOZIONI.filter(p => p.canale === selectedChannel),
+    [selectedChannel]
+  );
+
+  const effectivePromoCode = useMemo(() => {
+    if (selectedPromoCode && channelPromos.some(p => p.codice === selectedPromoCode)) {
+      return selectedPromoCode;
+    }
+    return channelPromos[0]?.codice;
+  }, [selectedPromoCode, channelPromos]);
+
+  const selectedPromo = useMemo(
+    () => channelPromos.find(p => p.codice === effectivePromoCode),
+    [channelPromos, effectivePromoCode]
+  );
 
   const gridState = useGridState(selectedPromo);
-  const {
-    selections,
-    columns,
-    volKeys,
-    affKeys,
-    toggleCell,
-    resetSelections,
-    applySelections,
-    collapsedReparti,
-    toggleReparto,
-    searchText,
-    setSearchText,
-    repartoFilter,
-    setRepartoFilter,
-    getRowTotals,
-    filteredGroups,
-    repartoBudgets,
-    totalBudget,
-  } = gridState;
 
-  const handlePromoChange = useCallback((idx) => {
-    setSelectedPromoIdx(idx);
-    resetSelections();
-  }, [resetSelections]);
+  const handleChannelChange = useCallback((c) => {
+    setSelectedChannel(c);
+    setSelectedPromoCode(null); // will fall back to first promo of new channel
+  }, []);
+
+  const handlePromoChange = useCallback((code) => {
+    setSelectedPromoCode(code);
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-dimar-gray">
       <Header
-        selectedPromoIdx={selectedPromoIdx}
+        selectedChannel={selectedChannel}
+        onChannelChange={handleChannelChange}
+        selectedPromoCode={effectivePromoCode}
         onPromoChange={handlePromoChange}
         view={view}
         onViewChange={setView}
+        onOpenAI={() => setAIOpen(true)}
       />
 
-      {view === 'v1' ? (
-        <div className="flex flex-1 overflow-hidden">
-          <BudgetDashboard repartoBudgets={repartoBudgets} totalBudget={totalBudget} />
-
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <GridFilters
-              searchText={searchText}
-              onSearchChange={setSearchText}
-              repartoFilter={repartoFilter}
-              onRepartoFilterChange={setRepartoFilter}
-            />
-            <PromoGrid
-              filteredGroups={filteredGroups}
-              columns={columns}
-              volKeys={volKeys}
-              affKeys={affKeys}
-              selections={selections}
-              toggleCell={toggleCell}
-              getRowTotals={getRowTotals}
-              collapsedReparti={collapsedReparti}
-              toggleReparto={toggleReparto}
-              repartoBudgets={repartoBudgets}
-            />
-          </div>
-        </div>
-      ) : (
-        <V2View gridState={gridState} selectedPromo={selectedPromo} />
+      {selectedPromo && (
+        view === 'v1' ? (
+          <V1View gridState={gridState} selectedPromo={selectedPromo} />
+        ) : (
+          <V2View gridState={gridState} selectedPromo={selectedPromo} />
+        )
       )}
 
-      <AISuggestions
-        columns={columns}
-        volKeys={volKeys}
-        onApply={applySelections}
-        onReset={resetSelections}
-      />
+      {aiOpen && (
+        <AIPlanPanel
+          channel={selectedChannel}
+          gridState={gridState}
+          onClose={() => setAIOpen(false)}
+          onSelectPromo={handlePromoChange}
+        />
+      )}
     </div>
   );
 }

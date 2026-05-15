@@ -45,8 +45,9 @@ export default function Stepper({
   if (variant === 'inline') {
     // Compact table cell stepper
     const sizes = {
-      sm: { h: 'h-6', btn: 'w-5', txt: 'text-[10px]', num: 'text-[10px]' },
-      md: { h: 'h-7', btn: 'w-6', txt: 'text-[11px]', num: 'text-xs' },
+      xs: { h: 'h-5', btn: 'w-4', txt: 'text-[9px]', num: 'text-[9px]', minw: 'min-w-[14px]' },
+      sm: { h: 'h-6', btn: 'w-5', txt: 'text-[10px]', num: 'text-[10px]', minw: 'min-w-[16px]' },
+      md: { h: 'h-7', btn: 'w-6', txt: 'text-[11px]', num: 'text-xs', minw: 'min-w-[18px]' },
     };
     const sz = sizes[size] || sizes.md;
     return (
@@ -63,7 +64,7 @@ export default function Stepper({
         >
           <span className={sz.txt}>−</span>
         </button>
-        <div className={`flex items-center justify-center px-1 min-w-[18px] font-mono font-bold tabular-nums ${sz.num} ${isActive ? cc.text : 'text-gray-300'} border-x border-current/10`}>
+        <div className={`flex items-center justify-center px-0.5 ${sz.minw} font-mono font-bold tabular-nums ${sz.num} ${isActive ? cc.text : 'text-gray-300'} border-x border-current/10`}>
           {v}
         </div>
         <button

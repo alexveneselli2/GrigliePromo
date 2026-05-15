@@ -42,7 +42,7 @@ export default function V1View({ gridState }) {
   );
 
   // Column count for header colspan calculation
-  const readonlyCols = 8; // Famiglia, Reparto, Vendite, Margine, Trend, Scontr, NVol, UltimaPromo
+  const readonlyCols = 7; // Famiglia, Vendite, Margine, Trend, Scontr, NVol, UltimaPromo
   const inputCols = sections.length * 2;
   const totalCols = readonlyCols + inputCols + 1; // +1 for Tot
 
@@ -82,28 +82,27 @@ export default function V1View({ gridState }) {
               </tr>
               {/* Column headers */}
               <tr className="bg-white border-b-2 border-gray-200">
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[200px] min-w-[200px]">Famiglia</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[110px]">Reparto</th>
-                <th className="px-3 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-20">Vendite</th>
-                <th className="px-3 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-14">Marg.</th>
-                <th className="px-3 py-2 text-center font-semibold text-gray-700 bg-gray-50 w-16">Trend</th>
-                <th className="px-3 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-14">Scontr.</th>
-                <th className="px-2 py-2 text-center font-semibold text-gray-700 bg-gray-50 w-10" title="Numero volte in volantino">N.Vol</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[120px]" title="Ultima promo in volantino">Ultima Promo</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[180px] min-w-[180px]">Famiglia</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-[70px]">Vendite</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-[50px]">Marg.</th>
+                <th className="px-1 py-2 text-center font-semibold text-gray-700 bg-gray-50 w-[50px]">Trend</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-700 bg-gray-50 w-[50px]">Scontr.</th>
+                <th className="px-1 py-2 text-center font-semibold text-gray-700 bg-gray-50 w-[36px]" title="Numero volte in volantino">N.V</th>
+                <th className="px-2 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[90px]" title="Ultima promo in volantino">Ult.Promo</th>
                 {sections.map(sec => (
-                  <th key={sec.key} colSpan={2} className="px-2 py-2 text-center font-semibold border-l border-gray-100 bg-white min-w-[140px]" title={sec.label}>
-                    <div className="text-[10px] truncate max-w-[140px] mx-auto">{sec.short}</div>
+                  <th key={sec.key} colSpan={2} className="px-1 py-2 text-center font-semibold border-l border-gray-100 bg-white min-w-[110px]" title={sec.label}>
+                    <div className="text-[10px] truncate max-w-[110px] mx-auto">{sec.short}</div>
                   </th>
                 ))}
-                <th className="px-2 py-2 text-center bg-gray-50 border-l-2 border-gray-300">Tot</th>
+                <th className="px-1 py-2 text-center bg-gray-50 border-l-2 border-gray-300 w-[36px]">Tot</th>
               </tr>
               {/* P/C sub-headers */}
               <tr className="bg-gray-50 border-b border-gray-200 text-[9px]">
                 <th colSpan={readonlyCols}></th>
                 {sections.map(sec => (
                   <Fragment key={sec.key}>
-                    <th className="text-center text-dimar-red font-bold border-l border-gray-100 py-0.5 min-w-[70px]">PROD</th>
-                    <th className="text-center text-rose-500 font-bold py-0.5 min-w-[70px]">CARD</th>
+                    <th className="text-center text-dimar-red font-bold border-l border-gray-100 py-0.5">PROD</th>
+                    <th className="text-center text-rose-500 font-bold py-0.5">CARD</th>
                   </Fragment>
                 ))}
                 <th></th>
@@ -151,22 +150,19 @@ export default function V1View({ gridState }) {
                       return (
                         <tr key={f.fc} className={`${stripe} hover:bg-yellow-50/40 border-b border-gray-100 transition-colors`}>
                           <td className="px-3 py-1.5 font-medium text-dimar-dark bg-gray-50/30 border-r border-gray-100">
-                            <span className="block truncate max-w-[190px]" title={f.fn}>{f.fn}</span>
+                            <span className="block truncate max-w-[170px] text-[11px]" title={f.fn}>{f.fn}</span>
                             <span className="block text-[9px] text-gray-400 truncate" title={f.sn}>{f.sn}</span>
                           </td>
-                          <td className="px-3 py-1.5 text-gray-600 bg-gray-50/30 text-[10px] truncate" title={f.rn}>
-                            {f.rn}
-                          </td>
-                          <td className="px-3 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums">{fmtEuro(f.v)}</td>
-                          <td className="px-3 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums">{fmtPct(f.margine)}</td>
-                          <td className="px-3 py-1.5 text-center bg-gray-50/30">
+                          <td className="px-2 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums text-[11px]">{fmtEuro(f.v)}</td>
+                          <td className="px-2 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums text-[11px]">{fmtPct(f.margine)}</td>
+                          <td className="px-1 py-1.5 text-center bg-gray-50/30">
                             <Sparkline values={[f.m1, f.m2, f.m3, f.m4]} />
                           </td>
-                          <td className="px-3 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums">{fmtPct(f.ps)}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-600 bg-gray-50/30 font-mono tabular-nums" title="Volte in volantino">
-                            {f.nVol || '—'}
+                          <td className="px-2 py-1.5 text-right text-gray-600 bg-gray-50/30 font-mono tabular-nums text-[11px]">{fmtPct(f.ps)}</td>
+                          <td className="px-1 py-1.5 text-center text-gray-600 bg-gray-50/30 font-mono tabular-nums text-[11px]" title="Volte in volantino">
+                            {f.nVol || <span className="text-gray-300">—</span>}
                           </td>
-                          <td className="px-3 py-1.5 text-gray-500 bg-gray-50/30 border-r border-gray-200 text-[10px] truncate" title={f.ultimaPromo || 'mai in volantino'}>
+                          <td className="px-2 py-1.5 text-gray-500 bg-gray-50/30 border-r border-gray-200 text-[10px] truncate" title={f.ultimaPromo || 'mai in volantino'}>
                             {f.ultimaPromo || <span className="text-gray-300">—</span>}
                           </td>
                           {sections.map(sec => {
@@ -178,7 +174,7 @@ export default function V1View({ gridState }) {
                                     <Stepper
                                       variant="inline"
                                       color={sec.color}
-                                      size="sm"
+                                      size="xs"
                                       value={v?.p || 0}
                                       onIncrement={() => incCellCount(f.fc, sec.key, 'p', 1)}
                                       onDecrement={() => incCellCount(f.fc, sec.key, 'p', -1)}
@@ -191,7 +187,7 @@ export default function V1View({ gridState }) {
                                     <Stepper
                                       variant="inline"
                                       color="rose"
-                                      size="sm"
+                                      size="xs"
                                       value={v?.c || 0}
                                       max={v?.p || 0}
                                       onIncrement={() => incCellCount(f.fc, sec.key, 'c', 1)}

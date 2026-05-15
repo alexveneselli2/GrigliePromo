@@ -125,17 +125,27 @@ export default function AISuggestionCard({ suggestion, accepted, onToggle }) {
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full bg-gradient-to-r ${sectionColor}`}>
               {s.sectionShort}
             </span>
-            {s.isCard ? (
-              <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-rose-100 text-rose-700">CARD</span>
-            ) : null}
+            {/* Multi-slot badges */}
+            {s.prodCount > 0 && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded bg-dimar-red text-white">
+                <span className="opacity-80">PROD</span>
+                <span className="text-sm leading-none">×{s.prodCount}</span>
+              </span>
+            )}
+            {s.cardCount > 0 && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded bg-rose-500 text-white">
+                <span className="opacity-80">CARD</span>
+                <span className="text-sm leading-none">×{s.cardCount}</span>
+              </span>
+            )}
             <ConfidenceBadge value={s.confidence} />
             {s.usageBefore > 0 && (
               <span className="text-[10px] text-amber-600 font-semibold">
-                {s.usageBefore}× nel piano
+                {s.usageBefore} slot prima
               </span>
             )}
           </div>
@@ -208,7 +218,14 @@ export default function AISuggestionCard({ suggestion, accepted, onToggle }) {
 
       {/* Predicted impact */}
       <div className="px-4 py-3 border-t border-gray-50 bg-violet-50/30">
-        <div className="text-[9px] uppercase tracking-wider font-bold text-violet-600 mb-1.5">Impatto previsto (sim.)</div>
+        <div className="text-[9px] uppercase tracking-wider font-bold text-violet-600 mb-1.5 flex items-center justify-between">
+          <span>Impatto previsto (sim.)</span>
+          {s.prodCount > 1 && (
+            <span className="text-[9px] text-gray-500 font-normal normal-case tracking-normal">
+              su {s.prodCount} slot
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
             <div className="text-sm font-bold text-violet-700 tabular-nums">

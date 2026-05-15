@@ -340,27 +340,74 @@ export function generateRichPlan(channelCode, weights = DEFAULT_WEIGHTS) {
           .map(f => {
             const b = computeBaseScore(f, promo, sec, weights, salesNorm, marginNorm, psNorm);
             const usage = familyUsage[f.fc] || 0;
-            const satPenalty = weights.saturationPenalty * Math.min(usage / 3, 1);
+            const satPenalty = weights.saturationPenalty * Math.min(usage / 4, 1);
             return { f, score: b.score - satPenalty, components: b.components, satPenalty };
           })
           .sort((a, b) => b.score - a.score);
 
-        const picks = candidates.slice(0, budget.prod);
-        const alternatives = candidates.slice(budget.prod, budget.prod + 3);
+        // ---- Multi-slot allocation ----
+        // Top-scoring families receive multiple slots, weaker ones a single slot.
+        // Cap individual allocation to a fraction of total budget to preserve diversity.
+        const maxPerFamily = Math.max(2, Math.min(5, Math.ceil(budget.prod * 0.30)));
 
-        // Assign CARD: top scontrini-prone families among picks
-        const cardSorted = [...picks]
-          .map(p => ({ ...p, cardSig: (psNorm[p.f.fc] || 0) * 0.6 + (salesNorm[p.f.fc] || 0) * 0.4 }))
-          .sort((a, b) => b.cardSig - a.cardSig);
-        const cardIds = new Set(cardSorted.slice(0, budget.card).map(c => c.f.fc));
+        let slotsLeft = budget.prod;
+        let cardLeft = budget.card;
+        const picks = [];
 
-        for (let i = 0; i < picks.length; i++) {
-          const pick = picks[i];
-          const isCard = cardIds.has(pick.f.fc);
-          const remainingAlts = candidates.slice(budget.prod, budget.prod + 4).slice(0, 3);
+        for (let ci = 0; ci < candidates.length; ci++) {
+          if (slotsLeft <= 0) break;
+          const cand = candidates[ci];
+          const s = cand.score;
+
+          // Score → desired slot count
+          let desired;
+          if (s > 0.55) desired = 4;
+          else if (s > 0.42) desired = 3;
+          else if (s > 0.28) desired = 2;
+          else desired = 1;
+
+          // Cap to maxPerFamily and remaining
+          let prodCount = Math.min(desired, maxPerFamily, slotsLeft);
+          // Reserve at least 1 slot for next 2 candidates (preserves diversity)
+          const reserve = Math.min(2, candidates.length - ci - 1);
+          prodCount = Math.max(1, Math.min(prodCount, slotsLeft - reserve));
+          if (prodCount < 1) prodCount = Math.min(1, slotsLeft);
+
+          // CARD allocation: proportional to scontrini penetration
+          const psScore = psNorm[cand.f.fc] || 0;
+          let cardCount = 0;
+          if (cardLeft > 0 && psScore > 0.20) {
+            cardCount = Math.max(1, Math.round(prodCount * Math.min(1, psScore * 0.9)));
+            cardCount = Math.min(cardCount, prodCount, cardLeft);
+          }
+
+          picks.push({ ...cand, prodCount, cardCount });
+          slotsLeft -= prodCount;
+          cardLeft -= cardCount;
+        }
+
+        const alternatives = candidates.slice(picks.length, picks.length + 3);
+
+        for (const pick of picks) {
+          const remainingAlts = alternatives.slice(0, 3);
           const conf = computeConfidence(pick, remainingAlts);
           const { reasons, warnings } = buildReasoning(pick.f, pick.components, promo, sec);
           const impact = predictImpact(pick.f, pick.components, sec);
+
+          // Multi-slot reasoning bonus
+          if (pick.prodCount >= 3) {
+            reasons.unshift({
+              icon: 'role',
+              text: `Allocazione concentrata: ${pick.prodCount} slot consigliati grazie a score elevato`,
+              strength: 'high',
+            });
+          } else if (pick.prodCount === 2) {
+            reasons.unshift({
+              icon: 'role',
+              text: `Doppio slot consigliato (score sopra media)`,
+              strength: 'medium',
+            });
+          }
 
           promoSuggestions.push({
             promoCode,
@@ -372,14 +419,18 @@ export function generateRichPlan(channelCode, weights = DEFAULT_WEIGHTS) {
             sectionColor: sec.color,
             repartoCode,
             repartoName: pick.f.rn,
-            isProd: 1,
-            isCard: isCard ? 1 : 0,
+            prodCount: pick.prodCount,
+            cardCount: pick.cardCount,
+            // Impact scaled by slot count
             score: pick.score,
             confidence: conf,
             components: pick.components,
             reasons,
             warnings,
-            impact,
+            impact: {
+              ...impact,
+              expectedRevenue: impact.expectedRevenue * pick.prodCount,
+            },
             alternatives: remainingAlts.map(a => ({
               fc: a.f.fc,
               fn: a.f.fn,
@@ -391,7 +442,8 @@ export function generateRichPlan(channelCode, weights = DEFAULT_WEIGHTS) {
             usageBefore: familyUsage[pick.f.fc] || 0,
           });
 
-          familyUsage[pick.f.fc] = (familyUsage[pick.f.fc] || 0) + 1;
+          // Track usage: each slot counts toward saturation
+          familyUsage[pick.f.fc] = (familyUsage[pick.f.fc] || 0) + pick.prodCount;
         }
       }
     }
@@ -424,6 +476,9 @@ export function generatePlanInsights(richByPromo, channelPromos) {
   const reuseRate = 1 - distinctFamilies.size / totalSuggestions;
   const avgConfidence = allSuggestions.reduce((s, x) => s + x.confidence, 0) / totalSuggestions;
   const totalExpectedRevenue = allSuggestions.reduce((s, x) => s + x.impact.expectedRevenue, 0);
+  const totalProdSlots = allSuggestions.reduce((s, x) => s + (x.prodCount || 1), 0);
+  const totalCardSlots = allSuggestions.reduce((s, x) => s + (x.cardCount || 0), 0);
+  const multiSlotCount = allSuggestions.filter(s => (s.prodCount || 1) > 1).length;
 
   // Insight: confidence
   insights.push({
@@ -475,6 +530,15 @@ export function generatePlanInsights(richByPromo, channelPromos) {
     value: `Q${maxQ}`,
   });
 
+  // Insight: multi-slot allocations
+  insights.push({
+    type: multiSlotCount > totalSuggestions * 0.3 ? 'positive' : 'neutral',
+    icon: 'role',
+    title: 'Allocazioni concentrate',
+    text: `${multiSlotCount} su ${totalSuggestions} proposte ricevono più di uno slot. In totale ${totalProdSlots} slot PROD e ${totalCardSlots} CARD distribuiti tra ${distinctFamilies.size} famiglie distinte.`,
+    value: `${multiSlotCount}/${totalSuggestions}`,
+  });
+
   // Insight: warnings count
   const totalWarnings = allSuggestions.reduce((s, x) => s + x.warnings.length, 0);
   if (totalWarnings > 0) {
@@ -502,7 +566,11 @@ export function buildSelectionsFromAccepted(accepted, richByPromo) {
       const key = `${s.fc}::${s.sectionKey}`;
       if (acc[key]) {
         if (!sel[s.fc]) sel[s.fc] = {};
-        sel[s.fc][s.sectionKey] = { p: s.isProd ? 1 : 0, c: s.isCard ? 1 : 0 };
+        // Multi-slot: PROD count and CARD count from the suggestion
+        sel[s.fc][s.sectionKey] = {
+          p: s.prodCount || 1,
+          c: s.cardCount || 0,
+        };
       }
     }
     selectionsByPromo[promoCode] = sel;

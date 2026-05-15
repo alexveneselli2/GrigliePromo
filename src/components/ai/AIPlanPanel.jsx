@@ -194,23 +194,25 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     for (const promoCode of Object.keys(plan.richByPromo)) {
       const sugs = plan.richByPromo[promoCode];
       const acc = accepted[promoCode] || {};
-      let aCount = 0, rCount = 0;
+      let aCount = 0, rCount = 0, slotsAcc = 0;
       for (const s of sugs) {
         const v = acc[`${s.fc}::${s.sectionKey}`];
-        if (v === true) aCount++;
-        else if (v === false) rCount++;
+        if (v === true) {
+          aCount++;
+          slotsAcc += (s.prodCount || 1);
+        } else if (v === false) rCount++;
       }
-      out[promoCode] = { total: sugs.length, accepted: aCount, rejected: rCount };
+      out[promoCode] = { total: sugs.length, accepted: aCount, rejected: rCount, slotsAcc };
     }
     return out;
   }, [plan, accepted]);
 
   const overallStats = useMemo(() => {
-    let total = 0, acc = 0, rej = 0;
+    let total = 0, acc = 0, rej = 0, slots = 0;
     for (const s of Object.values(statsByPromo)) {
-      total += s.total; acc += s.accepted; rej += s.rejected;
+      total += s.total; acc += s.accepted; rej += s.rejected; slots += s.slotsAcc || 0;
     }
-    return { total, accepted: acc, rejected: rej };
+    return { total, accepted: acc, rejected: rej, slots };
   }, [statsByPromo]);
 
   const filteredSuggestions = useMemo(() => {
@@ -544,18 +546,20 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
             <div className="text-xs">
               <span className="text-gray-500">Su </span>
               <strong className="text-dimar-dark">{overallStats.total}</strong>
-              <span className="text-gray-500"> suggerimenti totali · </span>
+              <span className="text-gray-500"> proposte · </span>
               <strong className="text-emerald-600">{overallStats.accepted}</strong>
-              <span className="text-gray-500"> accettati · </span>
+              <span className="text-gray-500"> accettate </span>
+              <span className="text-violet-600 font-bold">({overallStats.slots} slot)</span>
+              <span className="text-gray-500"> · </span>
               <strong className="text-red-500">{overallStats.rejected}</strong>
-              <span className="text-gray-500"> rifiutati</span>
+              <span className="text-gray-500"> rifiutate</span>
             </div>
             <button
               onClick={applyAccepted}
               disabled={overallStats.accepted === 0}
               className="ml-auto px-5 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-bold rounded-lg hover:shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Applica {overallStats.accepted} accettati alle promo
+              Applica {overallStats.accepted} proposte ({overallStats.slots} slot)
             </button>
           </div>
         )}

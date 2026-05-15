@@ -104,7 +104,7 @@ export default function V1Toolbar({
       )}
 
       <span className="ml-auto text-xs text-gray-500">
-        <strong>{visibleCount}</strong>/{totalCount} famiglie · <strong>P</strong>=PROD <strong>C</strong>=CARD
+        <strong>{visibleCount}</strong>/{totalCount} famiglie · usa <strong>−/+</strong> per impostare il numero di slot
       </span>
     </div>
   );

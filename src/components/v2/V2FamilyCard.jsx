@@ -1,4 +1,5 @@
 import { fmtEuro, fmtPct, sparklinePath } from '../../utils';
+import Stepper from '../common/Stepper';
 
 function MiniSparkline({ values }) {
   const path = sparklinePath(values);
@@ -16,59 +17,35 @@ function MiniSparkline({ values }) {
   );
 }
 
-const COLOR_CLASSES = {
-  red:    { activeP: 'bg-dimar-red text-white border-dimar-red',    activeC: 'bg-rose-500 text-white border-rose-500',    accent: 'text-dimar-red',  bar: 'bg-dimar-red' },
-  orange: { activeP: 'bg-orange-600 text-white border-orange-600',  activeC: 'bg-orange-400 text-white border-orange-400', accent: 'text-orange-600', bar: 'bg-orange-600' },
-  amber:  { activeP: 'bg-amber-600 text-white border-amber-600',    activeC: 'bg-amber-400 text-white border-amber-400',   accent: 'text-amber-600',  bar: 'bg-amber-600' },
-  green:  { activeP: 'bg-emerald-600 text-white border-emerald-600', activeC: 'bg-emerald-400 text-white border-emerald-400', accent: 'text-emerald-600', bar: 'bg-emerald-600' },
-  teal:   { activeP: 'bg-teal-600 text-white border-teal-600',      activeC: 'bg-teal-400 text-white border-teal-400',     accent: 'text-teal-600',   bar: 'bg-teal-600' },
-  blue:   { activeP: 'bg-blue-600 text-white border-blue-600',      activeC: 'bg-blue-400 text-white border-blue-400',     accent: 'text-blue-600',   bar: 'bg-blue-600' },
-};
-
-function SectionChips({ section, value, onToggle }) {
-  const cc = COLOR_CLASSES[section.color] || COLOR_CLASSES.red;
-  const pActive = !!value?.p;
-  const cActive = !!value?.c;
+function SectionStepperRow({ section, value, onInc }) {
+  const pCount = value?.p || 0;
+  const cCount = value?.c || 0;
 
   return (
-    <div className="flex items-center gap-1">
-      {/* PROD chip */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(section.key, 'p'); }}
-        title={`${section.label} (PROD)`}
-        className={`text-[10px] font-semibold pl-1.5 pr-2 py-1 rounded-l-full border transition-all duration-150 flex items-center gap-1 ${
-          pActive
-            ? `${cc.activeP} shadow-sm`
-            : `bg-white text-gray-500 border-gray-200 hover:${cc.accent}`
-        }`}
-      >
-        {pActive && (
-          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        )}
-        {section.short}
-      </button>
-      {/* CARD chip - smaller, only if PROD active */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(section.key, 'c'); }}
-        disabled={!pActive && !cActive}
-        title={`${section.label} (CARD)`}
-        className={`text-[9px] font-bold w-5 h-[26px] rounded-r-full border-y border-r transition-all duration-150 flex items-center justify-center -ml-1 ${
-          cActive
-            ? `${cc.activeC} shadow-sm`
-            : pActive
-              ? `bg-white text-gray-400 border-gray-200 hover:bg-gray-50`
-              : 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed opacity-50'
-        }`}
-      >
-        C
-      </button>
+    <div className="flex items-center gap-1.5">
+      <Stepper
+        variant="chip"
+        color={section.color}
+        label={section.short}
+        value={pCount}
+        onIncrement={() => onInc(section.key, 'p', 1)}
+        onDecrement={() => onInc(section.key, 'p', -1)}
+        title={`${section.label} – PROD`}
+      />
+      <Stepper
+        variant="chip"
+        color="rose"
+        label="C"
+        value={cCount}
+        onIncrement={() => onInc(section.key, 'c', 1)}
+        onDecrement={() => onInc(section.key, 'c', -1)}
+        title={`${section.label} – CARD (max ${pCount})`}
+      />
     </div>
   );
 }
 
-export default function V2FamilyCard({ family, sections, selections, onToggle, totals }) {
+export default function V2FamilyCard({ family, sections, selections, onInc, totals }) {
   const isActive = totals.totSlot > 0;
   const mainSections = sections.filter(s => s.group !== 'aff');
   const affSections = sections.filter(s => s.group === 'aff');
@@ -122,20 +99,20 @@ export default function V2FamilyCard({ family, sections, selections, onToggle, t
         </div>
       </div>
 
-      {/* Section chips */}
+      {/* Section steppers */}
       {mainSections.length > 0 && (
         <div className="px-4 pb-2">
           <div className="flex items-center gap-1.5 mb-1.5">
             <div className="w-1 h-3 bg-dimar-red rounded-full" />
-            <span className="text-[9px] uppercase tracking-wider font-bold text-dimar-red">Sezioni</span>
+            <span className="text-[9px] uppercase tracking-wider font-bold text-dimar-red">Sezioni · PROD · CARD</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {mainSections.map(sec => (
-              <SectionChips
+              <SectionStepperRow
                 key={sec.key}
                 section={sec}
                 value={selections[sec.key]}
-                onToggle={onToggle}
+                onInc={onInc}
               />
             ))}
           </div>
@@ -150,11 +127,11 @@ export default function V2FamilyCard({ family, sections, selections, onToggle, t
           </div>
           <div className="flex flex-wrap gap-1.5">
             {affSections.map(sec => (
-              <SectionChips
+              <SectionStepperRow
                 key={sec.key}
                 section={sec}
                 value={selections[sec.key]}
-                onToggle={onToggle}
+                onInc={onInc}
               />
             ))}
           </div>

@@ -2,6 +2,7 @@ import { Fragment, useMemo } from 'react';
 import { fmtEuro, fmtPct, sparklinePath, budgetColor } from '../../utils';
 import V1BudgetSidebar from './V1BudgetSidebar';
 import V1Toolbar from './V1Toolbar';
+import Stepper from '../common/Stepper';
 
 function Sparkline({ values }) {
   return (
@@ -11,23 +12,12 @@ function Sparkline({ values }) {
   );
 }
 
-function Cell({ value, type, onClick }) {
-  const active = !!value;
-  const cls = type === 'p'
-    ? (active ? 'bg-dimar-red border-dimar-red text-white scale-105' : 'border-gray-300 hover:border-dimar-red/50 bg-white text-transparent')
-    : (active ? 'bg-rose-500 border-rose-500 text-white' : 'border-gray-300 hover:border-rose-400/50 bg-white text-gray-300');
-  return (
-    <button onClick={onClick} className={`w-6 h-6 rounded border-2 flex items-center justify-center text-[9px] font-bold transition-all duration-150 ${cls}`}>
-      {type === 'p' ? (active ? '✓' : '') : 'C'}
-    </button>
-  );
-}
 
 export default function V1View({ gridState }) {
   const {
     sections,
     selections,
-    toggleCell,
+    incCellCount,
     getRowTotals,
     filteredGroups,
     groupedFamilies,
@@ -101,8 +91,8 @@ export default function V1View({ gridState }) {
                 <th className="px-2 py-2 text-center font-semibold text-gray-700 bg-gray-50 w-10" title="Numero volte in volantino">N.Vol</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-700 bg-gray-50 w-[120px]" title="Ultima promo in volantino">Ultima Promo</th>
                 {sections.map(sec => (
-                  <th key={sec.key} colSpan={2} className="px-2 py-2 text-center font-semibold border-l border-gray-100 bg-white" title={sec.label}>
-                    <div className="text-[10px] truncate max-w-[100px] mx-auto">{sec.short}</div>
+                  <th key={sec.key} colSpan={2} className="px-2 py-2 text-center font-semibold border-l border-gray-100 bg-white min-w-[140px]" title={sec.label}>
+                    <div className="text-[10px] truncate max-w-[140px] mx-auto">{sec.short}</div>
                   </th>
                 ))}
                 <th className="px-2 py-2 text-center bg-gray-50 border-l-2 border-gray-300">Tot</th>
@@ -112,8 +102,8 @@ export default function V1View({ gridState }) {
                 <th colSpan={readonlyCols}></th>
                 {sections.map(sec => (
                   <Fragment key={sec.key}>
-                    <th className="text-center text-dimar-red font-bold border-l border-gray-100 py-0.5">P</th>
-                    <th className="text-center text-rose-500 font-bold py-0.5">C</th>
+                    <th className="text-center text-dimar-red font-bold border-l border-gray-100 py-0.5 min-w-[70px]">PROD</th>
+                    <th className="text-center text-rose-500 font-bold py-0.5 min-w-[70px]">CARD</th>
                   </Fragment>
                 ))}
                 <th></th>
@@ -185,12 +175,29 @@ export default function V1View({ gridState }) {
                               <Fragment key={sec.key}>
                                 <td className="px-1 py-1 text-center border-l border-gray-50">
                                   <div className="flex justify-center">
-                                    <Cell value={v?.p} type="p" onClick={() => toggleCell(f.fc, sec.key, 'p')} />
+                                    <Stepper
+                                      variant="inline"
+                                      color={sec.color}
+                                      size="sm"
+                                      value={v?.p || 0}
+                                      onIncrement={() => incCellCount(f.fc, sec.key, 'p', 1)}
+                                      onDecrement={() => incCellCount(f.fc, sec.key, 'p', -1)}
+                                      title={`${sec.label} – PROD`}
+                                    />
                                   </div>
                                 </td>
                                 <td className="px-1 py-1 text-center">
                                   <div className="flex justify-center">
-                                    <Cell value={v?.c} type="c" onClick={() => toggleCell(f.fc, sec.key, 'c')} />
+                                    <Stepper
+                                      variant="inline"
+                                      color="rose"
+                                      size="sm"
+                                      value={v?.c || 0}
+                                      max={v?.p || 0}
+                                      onIncrement={() => incCellCount(f.fc, sec.key, 'c', 1)}
+                                      onDecrement={() => incCellCount(f.fc, sec.key, 'c', -1)}
+                                      title={`${sec.label} – CARD (max ${v?.p || 0})`}
+                                    />
                                   </div>
                                 </td>
                               </Fragment>

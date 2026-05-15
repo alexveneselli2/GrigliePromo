@@ -9,6 +9,7 @@ export default function V2View({ gridState, selectedPromo }) {
     selections,
     sections,
     toggleCell,
+    incCellCount,
     getRowTotals,
     searchText,
     setSearchText,
@@ -107,7 +108,7 @@ export default function V2View({ gridState, selectedPromo }) {
                         family={f}
                         sections={sections}
                         selections={selections[f.fc] || {}}
-                        onToggle={(secKey, type) => toggleCell(f.fc, secKey, type)}
+                        onInc={(secKey, type, delta) => incCellCount(f.fc, secKey, type, delta)}
                         totals={getRowTotals(f.fc)}
                       />
                     ))}

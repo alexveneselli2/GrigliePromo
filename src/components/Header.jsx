@@ -1,6 +1,13 @@
 import PROMOZIONI from '../data/promozioni';
 import CANALI from '../data/canali';
 
+function formatDateTime(dt) {
+  if (!dt) return '—';
+  const d = new Date(dt);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function Header({
   selectedChannel,
   onChannelChange,
@@ -9,6 +16,12 @@ export default function Header({
   view,
   onViewChange,
   onOpenAI,
+  onSave,
+  onSendData,
+  lastSavedAt,
+  lastSentAt,
+  saving,
+  sending,
 }) {
   const channelPromos = PROMOZIONI.filter(p => p.canale === selectedChannel);
   const promo = channelPromos.find(p => p.codice === selectedPromoCode) || channelPromos[0];
@@ -87,30 +100,93 @@ export default function Header({
           </button>
         )}
 
-        {/* View toggle - top right */}
-        {view && onViewChange && (
-          <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1 shrink-0">
+        {/* Save + Send + View toggle */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Save */}
+          <button
+            onClick={onSave}
+            disabled={saving}
+            title={lastSavedAt ? `Ultimo salvataggio locale: ${formatDateTime(lastSavedAt)}` : 'Salva le selezioni'}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              saving
+                ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
+                : 'bg-white border-gray-200 text-gray-600 hover:border-emerald-300 hover:text-emerald-600'
+            }`}
+          >
+            {saving ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Salvato
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                Salva
+              </>
+            )}
+          </button>
+
+          {/* Send to DWH */}
+          <div className="flex flex-col items-end">
             <button
-              onClick={() => onViewChange('v1')}
-              className={`px-3 py-1 text-xs font-semibold rounded-full transition-all ${
-                view === 'v1' ? 'bg-white text-dimar-dark shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
+              onClick={onSendData}
+              disabled={sending}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                sending
+                  ? 'bg-indigo-100 text-indigo-700 cursor-wait'
+                  : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-sm hover:shadow-md'
               }`}
             >
-              Classic
+              {sending ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="40 60" />
+                  </svg>
+                  Invio...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  Invia Dati
+                </>
+              )}
             </button>
-            <button
-              onClick={() => onViewChange('v2')}
-              className={`px-3 py-1 text-xs font-semibold rounded-full transition-all flex items-center gap-1 ${
-                view === 'v2' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
-              }`}
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Nuova UI
-            </button>
+            <span className="text-[9px] text-gray-400 mt-0.5 leading-none">
+              DWH: {lastSentAt ? formatDateTime(lastSentAt) : 'mai inviato'}
+            </span>
           </div>
-        )}
+
+          {/* View toggle */}
+          {view && onViewChange && (
+            <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1">
+              <button
+                onClick={() => onViewChange('v1')}
+                className={`px-3 py-1 text-xs font-semibold rounded-full transition-all ${
+                  view === 'v1' ? 'bg-white text-dimar-dark shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
+                }`}
+              >
+                Classic
+              </button>
+              <button
+                onClick={() => onViewChange('v2')}
+                className={`px-3 py-1 text-xs font-semibold rounded-full transition-all flex items-center gap-1 ${
+                  view === 'v2' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-dimar-dark'
+                }`}
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Nuova UI
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Promo detail bar */}

@@ -77,7 +77,7 @@ export function getPromoTotalBudget(promoCode, sectionKey) {
 }
 
 export default function useGridState(selectedPromo) {
-  // selections[fc][sectionKey] = { p: 0|1, c: 0|1 }
+  // selections[fc][sectionKey] = { p: number, c: number } - numeric count of slots
   const [allSelections, setAllSelections] = useState({}); // keyed by promoCode
   const [collapsedReparti, setCollapsedReparti] = useState({});
   const [searchText, setSearchText] = useState('');
@@ -96,15 +96,43 @@ export default function useGridState(selectedPromo) {
 
   const sections = useMemo(() => getSectionsForPromo(selectedPromo), [selectedPromo]);
 
+  // Toggle between 0 and 1 (click-to-activate). Use setCellCount for numeric updates.
   const toggleCell = useCallback((fc, sectionKey, type = 'p') => {
     setSelections(prev => {
       const row = prev[fc] || {};
       const sec = row[sectionKey] || { p: 0, c: 0 };
-      const newSec = { ...sec, [type]: sec[type] ? 0 : 1 };
-      // If marking as Card, auto-mark Prod too
-      if (type === 'c' && newSec.c) newSec.p = 1;
-      // If unmarking Prod, also unmark Card
-      if (type === 'p' && !newSec.p) newSec.c = 0;
+      const cur = sec[type] || 0;
+      const newSec = { ...sec, [type]: cur > 0 ? 0 : 1 };
+      if (type === 'c' && newSec.c > 0 && !newSec.p) newSec.p = newSec.c;
+      if (type === 'p' && newSec.p === 0) newSec.c = 0;
+      return { ...prev, [fc]: { ...row, [sectionKey]: newSec } };
+    });
+  }, [setSelections]);
+
+  // Set numeric count for a cell (clamped >= 0)
+  const setCellCount = useCallback((fc, sectionKey, type, count) => {
+    const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+    setSelections(prev => {
+      const row = prev[fc] || {};
+      const sec = row[sectionKey] || { p: 0, c: 0 };
+      const newSec = { ...sec, [type]: safeCount };
+      // Card cannot exceed Prod
+      if (type === 'c' && safeCount > (newSec.p || 0)) newSec.p = safeCount;
+      // If reducing Prod below Card, clamp Card
+      if (type === 'p' && (newSec.c || 0) > safeCount) newSec.c = safeCount;
+      return { ...prev, [fc]: { ...row, [sectionKey]: newSec } };
+    });
+  }, [setSelections]);
+
+  const incCellCount = useCallback((fc, sectionKey, type, delta = 1) => {
+    setSelections(prev => {
+      const row = prev[fc] || {};
+      const sec = row[sectionKey] || { p: 0, c: 0 };
+      const cur = sec[type] || 0;
+      const next = Math.max(0, cur + delta);
+      const newSec = { ...sec, [type]: next };
+      if (type === 'c' && next > (newSec.p || 0)) newSec.p = next;
+      if (type === 'p' && (newSec.c || 0) > next) newSec.c = next;
       return { ...prev, [fc]: { ...row, [sectionKey]: newSec } };
     });
   }, [setSelections]);
@@ -160,19 +188,19 @@ export default function useGridState(selectedPromo) {
       }));
   }, [families]);
 
-  // Row totals for a family
+  // Row totals for a family - sum of P and C counts across all sections
   const getRowTotals = useCallback((fc) => {
     const row = selections[fc] || {};
     let totProd = 0, totCard = 0;
     for (const s of sections) {
       const v = row[s.key];
-      if (v?.p) totProd++;
-      if (v?.c) totCard++;
+      totProd += (v?.p || 0);
+      totCard += (v?.c || 0);
     }
     return { totProd, totCard, totSlot: totProd + totCard };
   }, [selections, sections]);
 
-  // Per-reparto budgets (PROD/CARD per section)
+  // Per-reparto budgets (PROD/CARD per section, summed counts)
   const repartoBudgets = useMemo(() => {
     return groupedFamilies.map(g => {
       const sectionBudgets = {};
@@ -184,8 +212,8 @@ export default function useGridState(selectedPromo) {
         for (const f of g.families) {
           const row = selections[f.fc] || {};
           const v = row[sec.key];
-          if (v?.p) usedProd++;
-          if (v?.c) usedCard++;
+          usedProd += (v?.p || 0);
+          usedCard += (v?.c || 0);
         }
         sectionBudgets[sec.key] = { prod: b.prod, card: b.card, usedProd, usedCard };
         totalProd += b.prod;
@@ -207,15 +235,15 @@ export default function useGridState(selectedPromo) {
     });
   }, [groupedFamilies, sections, promoCode, selections]);
 
-  // Total per-section budgets (whole promo)
+  // Total per-section budgets (whole promo) - summed counts
   const sectionTotals = useMemo(() => {
     return sections.map(sec => {
       const total = getPromoTotalBudget(promoCode, sec.key);
       let usedProd = 0, usedCard = 0;
       for (const fc of Object.keys(selections)) {
         const v = selections[fc][sec.key];
-        if (v?.p) usedProd++;
-        if (v?.c) usedCard++;
+        usedProd += (v?.p || 0);
+        usedCard += (v?.c || 0);
       }
       return {
         ...sec,
@@ -258,6 +286,8 @@ export default function useGridState(selectedPromo) {
     allSelections,
     sections,
     toggleCell,
+    setCellCount,
+    incCellCount,
     resetSelections,
     applySelections,
     applyMultiPromoSuggestions,

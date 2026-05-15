@@ -7,6 +7,7 @@ import {
 } from '../../ai/engine';
 import PROMOZIONI from '../../data/promozioni';
 import AISuggestionCard from './AISuggestionCard';
+import AIWeightsTab from './AIWeightsTab';
 
 const THINKING_STEPS = [
   '🔍 Analisi anagrafica famiglie...',
@@ -39,25 +40,6 @@ function ThinkingAnimation({ done }) {
         <p className="text-sm text-violet-700 font-semibold animate-pulse">{THINKING_STEPS[stepIdx]}</p>
         <p className="text-xs text-gray-400 mt-1">Il modello sta ragionando sull'intero portafoglio</p>
       </div>
-    </div>
-  );
-}
-
-function WeightSlider({ label, value, onChange, sub }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between text-xs mb-1">
-        <span className="font-semibold text-dimar-dark">{label}</span>
-        <span className="font-mono text-violet-600 tabular-nums">{(value * 100).toFixed(0)}</span>
-      </div>
-      {sub && <p className="text-[10px] text-gray-400 mb-1">{sub}</p>}
-      <input
-        type="range"
-        min="0" max="0.4" step="0.01"
-        value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-full accent-violet-600"
-      />
     </div>
   );
 }
@@ -235,8 +217,6 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     gridState.applyMultiPromoSuggestions(selections);
     onClose();
   };
-
-  const setW = (k, v) => setWeights(w => ({ ...w, [k]: v }));
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -434,27 +414,11 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
           )}
 
           {tab === 'weights' && (
-            <div className="flex-1 overflow-y-auto p-6 max-w-2xl">
-              <p className="text-xs text-gray-500 mb-4">
-                Modifica i pesi per influenzare l'AI. Premi <strong>Re-genera piano</strong> per vedere l'effetto.
-              </p>
-              <div className="grid grid-cols-2 gap-5">
-                <WeightSlider label="Vendite (norm. per reparto)" value={weights.sales} onChange={v => setW('sales', v)} sub="Quanto pesa il volume" />
-                <WeightSlider label="Margine" value={weights.margin} onChange={v => setW('margin', v)} sub="Marginalità famiglia" />
-                <WeightSlider label="Penetrazione scontrini" value={weights.scontrini} onChange={v => setW('scontrini', v)} sub="Rilevanza per cliente" />
-                <WeightSlider label="Stagionalità" value={weights.seasonality} onChange={v => setW('seasonality', v)} sub="Allineamento M1-M4" />
-                <WeightSlider label="Affinità tematica" value={weights.themeAffinity} onChange={v => setW('themeAffinity', v)} sub="Match keyword tema" />
-                <WeightSlider label="Boost ruolo" value={weights.roleBoost} onChange={v => setW('roleBoost', v)} sub="A → top; C → spread" />
-                <WeightSlider label="Penalty recency" value={weights.recencyPenalty} onChange={v => setW('recencyPenalty', v)} sub="Penalizza recenti" />
-                <WeightSlider label="Penalty saturazione" value={weights.saturationPenalty} onChange={v => setW('saturationPenalty', v)} sub="Garantisce rotazione" />
-              </div>
-              <button
-                onClick={() => setWeights(DEFAULT_WEIGHTS)}
-                className="mt-6 text-xs text-violet-600 hover:underline"
-              >
-                Reset ai valori predefiniti
-              </button>
-            </div>
+            <AIWeightsTab
+              weights={weights}
+              onChange={setWeights}
+              onReset={() => setWeights(DEFAULT_WEIGHTS)}
+            />
           )}
 
           {tab === 'about' && (

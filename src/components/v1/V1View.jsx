@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment, useMemo, useState, useCallback } from 'react';
 import { fmtEuro, fmtPct, sparklinePath, budgetColor } from '../../utils';
 import V1BudgetSidebar from './V1BudgetSidebar';
 import V1Toolbar from './V1Toolbar';
@@ -32,14 +32,46 @@ export default function V1View({ gridState }) {
     setRepartoFilter,
   } = gridState;
 
+  const [sortBy, setSortBy] = useState('default');
+  const [showOnlyAssigned, setShowOnlyAssigned] = useState(false);
+
   const totalCount = useMemo(
     () => groupedFamilies.reduce((s, g) => s + g.families.length, 0),
     [groupedFamilies]
   );
+
+  const displayGroups = useMemo(() => {
+    return filteredGroups.map(g => {
+      let families = [...g.families];
+      if (showOnlyAssigned) {
+        families = families.filter(f => getRowTotals(f.fc).totSlot > 0);
+      }
+      if (sortBy === 'vendite') families.sort((a, b) => b.v - a.v);
+      else if (sortBy === 'margine') families.sort((a, b) => b.margine - a.margine);
+      else if (sortBy === 'assigned') {
+        families.sort((a, b) => getRowTotals(b.fc).totSlot - getRowTotals(a.fc).totSlot);
+      }
+      return { ...g, families };
+    }).filter(g => g.families.length > 0);
+  }, [filteredGroups, sortBy, showOnlyAssigned, getRowTotals]);
+
   const visibleCount = useMemo(
-    () => filteredGroups.reduce((s, g) => s + g.families.length, 0),
-    [filteredGroups]
+    () => displayGroups.reduce((s, g) => s + g.families.length, 0),
+    [displayGroups]
   );
+
+  const allCollapsed = useMemo(
+    () => displayGroups.length > 0 && displayGroups.every(g => collapsedReparti[g.code]),
+    [displayGroups, collapsedReparti]
+  );
+
+  const expandAll = useCallback(() => {
+    displayGroups.forEach(g => { if (collapsedReparti[g.code]) toggleReparto(g.code); });
+  }, [displayGroups, collapsedReparti, toggleReparto]);
+
+  const collapseAll = useCallback(() => {
+    displayGroups.forEach(g => { if (!collapsedReparti[g.code]) toggleReparto(g.code); });
+  }, [displayGroups, collapsedReparti, toggleReparto]);
 
   // Column count for header colspan calculation
   const readonlyCols = 7; // Famiglia, Vendite, Margine, Trend, Scontr, NVol, UltimaPromo
@@ -63,6 +95,13 @@ export default function V1View({ gridState }) {
           onRepartoFilterChange={setRepartoFilter}
           totalCount={totalCount}
           visibleCount={visibleCount}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          showOnlyAssigned={showOnlyAssigned}
+          onShowOnlyAssignedChange={setShowOnlyAssigned}
+          allCollapsed={allCollapsed}
+          onExpandAll={expandAll}
+          onCollapseAll={collapseAll}
         />
 
         <div className="flex-1 overflow-auto">
@@ -109,7 +148,7 @@ export default function V1View({ gridState }) {
               </tr>
             </thead>
             <tbody>
-              {filteredGroups.map(group => {
+              {displayGroups.map(group => {
                 const isCollapsed = collapsedReparti[group.code];
                 const budget = repartoBudgets.find(r => r.code === group.code);
                 const semColor = budgetColor(budget?.usedProdTot || 0, budget?.totalProd || 0);

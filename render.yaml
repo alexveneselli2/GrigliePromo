@@ -1,0 +1,22 @@
+# Render Blueprint for the AI proxy backend.
+# Deploy: Render Dashboard → New → Blueprint → pick this repo.
+# Then set the ANTHROPIC_API_KEY secret in the service's Environment tab.
+services:
+  - type: web
+    name: grigliepromo-ai-proxy
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Secret — set this value in the Render dashboard, never in the repo.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Browser origins allowed to call the proxy (your GitHub Pages site).
+      - key: ALLOWED_ORIGINS
+        value: https://alexveneselli2.github.io
+      - key: AI_MODEL
+        value: claude-opus-4-8

@@ -238,29 +238,29 @@ function InsightCard({ insight }) {
   );
 }
 
-export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onClose, onSelectPromo }) {
-  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
+export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiState, onClose, onSelectPromo }) {
+  // Persistent state (survives panel close/reopen) from useAIState in App
+  const {
+    aiAvailable,
+    weights, setWeights,
+    engine, setEngine,
+    plan, setPlan,
+    accepted, setAccepted,
+    activePromo, setActivePromo,
+    lastPayload, setLastPayload,
+    lastAiResult, setLastAiResult,
+    aiError, setAiError,
+  } = aiState;
+
+  // Transient state (resets each time panel opens — that's fine)
   const [thinking, setThinking] = useState(false);
-  const [plan, setPlan] = useState(null);
-  const [activePromo, setActivePromo] = useState(null);
-  const [filterMode, setFilterMode] = useState('all'); // all | warnings | high-conf | low-conf | pending
-  const [activeSection, setActiveSection] = useState('all'); // section key filter
-  const [groupBy, setGroupBy] = useState('section'); // 'section' | 'reparto' | 'none'
+  const [filterMode, setFilterMode] = useState('all');
+  const [activeSection, setActiveSection] = useState('all');
+  const [groupBy, setGroupBy] = useState('section');
   const [tab, setTab] = useState('plan');
-  // engine: 'heuristic' (local, offline) | 'ai' (real Claude via proxy)
-  const aiAvailable = isAIConfigured();
-  const [engine, setEngine] = useState(aiAvailable ? 'ai' : 'heuristic');
-  const [aiError, setAiError] = useState(null);
-  // Progress while running AI one promo at a time: { done, total, current }
   const [aiProgress, setAiProgress] = useState(null);
-  // Stored payload/response for the detail report page
-  const [lastPayload, setLastPayload] = useState(null);
-  const [lastAiResult, setLastAiResult] = useState(null);
-  // Sub-pages
   const [showDetailReport, setShowDetailReport] = useState(false);
   const [showDataStructure, setShowDataStructure] = useState(false);
-  // accepted[promoCode][`${fc}::${sectionKey}`] = true | false
-  const [accepted, setAccepted] = useState({});
 
   const channelPromos = useMemo(
     () => PROMOZIONI.filter(p => p.canale === channel)

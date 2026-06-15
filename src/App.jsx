@@ -5,6 +5,7 @@ import V2View from './components/v2/V2View';
 import AIPlanPanel from './components/ai/AIPlanPanel';
 import V1View from './components/v1/V1View';
 import useGridState from './hooks/useGridState';
+import useAIState from './hooks/useAIState';
 
 // Initial last-sent timestamp: a few hours ago for realism
 const INITIAL_LAST_SENT = (() => {
@@ -42,6 +43,7 @@ export default function App() {
   );
 
   const gridState = useGridState(selectedPromo);
+  const aiState = useAIState();
 
   const handleChannelChange = useCallback((c) => {
     setSelectedChannel(c);
@@ -97,6 +99,7 @@ export default function App() {
           channel={selectedChannel}
           selectedPromoCode={effectivePromoCode}
           gridState={gridState}
+          aiState={aiState}
           onClose={() => setAIOpen(false)}
           onSelectPromo={handlePromoChange}
         />

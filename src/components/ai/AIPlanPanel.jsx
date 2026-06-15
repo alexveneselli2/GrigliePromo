@@ -14,54 +14,106 @@ import AIWeightsTab from './AIWeightsTab';
 import AIDetailReport from './AIDetailReport';
 import DataStructurePage from './DataStructurePage';
 
-const THINKING_STEPS = [
-  '🔍 Analisi anagrafica famiglie...',
-  '📊 Calcolo normalizzazioni per reparto...',
-  '📅 Valutazione stagionalità M1-M4...',
-  '🎯 Match keyword tematici...',
-  '⏱  Calcolo recency penalty...',
-  '🔄 Ottimizzazione rotazione cross-promo...',
-  '⚖️  Bilanciamento budget per sezione...',
-  '✨ Generazione confidence + reasoning...',
+// Real progress steps for AI mode (each maps to an actual action in runAIPlan)
+const AI_STEPS = [
+  { key: 'prepare', label: 'Preparazione dati candidati e profili arricchiti', pct: 5 },
+  { key: 'payload', label: 'Costruzione payload con top-15 candidati per sezione', pct: 10 },
+  { key: 'send', label: 'Invio richiesta a Claude (claude-opus-4-8)', pct: 15 },
+  { key: 'thinking', label: 'Claude sta ragionando (extended thinking)…', pct: 25 },
+  { key: 'waiting', label: 'In attesa della risposta strutturata…', pct: 50 },
+  { key: 'received', label: 'Risposta ricevuta — validazione schema Zod', pct: 80 },
+  { key: 'assemble', label: 'Assemblaggio piano e clamp budget', pct: 90 },
+  { key: 'done', label: 'Piano completato', pct: 100 },
 ];
 
-function ThinkingAnimation({ done, progress }) {
-  const [stepIdx, setStepIdx] = useState(0);
-  useEffect(() => {
-    if (done) return;
-    const t = setInterval(() => {
-      setStepIdx(s => (s + 1) % THINKING_STEPS.length);
-    }, 350);
-    return () => clearInterval(t);
-  }, [done]);
-
-  const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
+function AIThinkingPanel({ progress }) {
+  const step = progress?.step ? AI_STEPS.find(s => s.key === progress.step) : null;
+  const pct = step?.pct ?? 0;
+  const promoCode = progress?.promoCode;
+  const tema = progress?.tema;
+  const stats = progress?.stats;
 
   return (
-    <div className="flex flex-col items-center justify-center h-64 gap-5">
-      <div className="relative w-16 h-16">
-        <div className="absolute inset-0 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
-        <div className="absolute inset-2 rounded-full border-2 border-fuchsia-200 border-b-fuchsia-500 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
-      </div>
-      <div className="text-center min-h-[2rem]">
-        <p className="text-sm text-violet-700 font-semibold animate-pulse">{THINKING_STEPS[stepIdx]}</p>
-        {progress ? (
-          <>
-            <p className="text-xs text-gray-500 mt-1">
-              {progress.current
-                ? <>Analisi promo <strong>{progress.current}</strong> ({progress.done + 1}/{progress.total})</>
-                : <>Composizione del piano…</>}
-            </p>
-            {pct != null && (
-              <div className="w-56 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2 mx-auto">
-                <div className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full transition-all" style={{ width: `${pct}%` }} />
-              </div>
-            )}
-          </>
-        ) : (
-          <p className="text-xs text-gray-400 mt-1">Il modello sta ragionando sull'intero portafoglio</p>
+    <div className="flex-1 flex items-center justify-center">
+      <div className="w-full max-w-md px-6">
+        {/* Spinner */}
+        <div className="flex justify-center mb-6">
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
+            <div className="absolute inset-2 rounded-full border-2 border-fuchsia-200 border-b-fuchsia-500 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+          </div>
+        </div>
+
+        {/* Promo info */}
+        {promoCode && (
+          <div className="text-center mb-4">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-violet-50 border border-violet-200 rounded-lg">
+              <span className="text-sm font-bold text-violet-700">{promoCode}</span>
+              {tema && <span className="text-xs text-gray-500">{tema.split(' - ')[0]?.slice(0, 30)}</span>}
+            </span>
+          </div>
         )}
+
+        {/* Progress bar */}
+        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
+          <div
+            className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full transition-all duration-700 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+
+        {/* Percentage + step label */}
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-xs text-gray-500">{step?.label || 'Inizializzazione…'}</span>
+          <span className="text-xs font-bold text-violet-600 tabular-nums">{pct}%</span>
+        </div>
+
+        {/* Stats about the request */}
+        {stats && (
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            <div className="text-center bg-gray-50 rounded-lg p-2 border border-gray-100">
+              <div className="text-lg font-bold text-violet-700 tabular-nums">{stats.sections}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Sezioni</div>
+            </div>
+            <div className="text-center bg-gray-50 rounded-lg p-2 border border-gray-100">
+              <div className="text-lg font-bold text-violet-700 tabular-nums">{stats.candidates}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Candidati</div>
+            </div>
+            <div className="text-center bg-gray-50 rounded-lg p-2 border border-gray-100">
+              <div className="text-lg font-bold text-violet-700 tabular-nums">{stats.reparti}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Reparti</div>
+            </div>
+          </div>
+        )}
+
+        {/* Steps completed */}
+        <div className="mt-5 space-y-1.5">
+          {AI_STEPS.filter(s => s.pct <= pct && s.key !== 'done').map(s => (
+            <div key={s.key} className="flex items-center gap-2 text-[11px]">
+              <span className={`shrink-0 w-4 h-4 rounded-full flex items-center justify-center ${
+                s.pct < pct ? 'bg-emerald-500 text-white' : 'bg-violet-100 text-violet-600 animate-pulse'
+              }`}>
+                {s.pct < pct
+                  ? <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  : <div className="w-1.5 h-1.5 rounded-full bg-violet-600" />
+                }
+              </span>
+              <span className={s.pct < pct ? 'text-gray-400 line-through' : 'text-gray-700 font-medium'}>{s.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function HeuristicThinking() {
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="relative w-14 h-14">
+        <div className="absolute inset-0 rounded-full border-4 border-gray-200 border-t-gray-600 animate-spin" />
+      </div>
+      <p className="text-sm text-gray-600 font-semibold">Calcolo euristico in corso…</p>
     </div>
   );
 }
@@ -257,27 +309,63 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
     setPlan(null);
     setAccepted({});
     setAiError(null);
+    const promoCode = targetPromo?.codice;
+    const tema = targetPromo?.tema;
+    const setStep = (step, stats) => setAiProgress({ step, promoCode, tema, stats });
     try {
-      // The AI analyses ONLY the selected promo — a single, focused request.
       if (!targetPromo) {
         setThinking(false);
         setAiError('Nessuna promo selezionata da analizzare.');
         return;
       }
-      setAiProgress({ done: 0, total: 1, current: targetPromo.codice });
-      // top-15 candidates per section/reparto: gives Claude real room to
-      // explore rather than just refining a narrow heuristic preselection.
-      const payload = buildAIChannelPayload(channel, weights, 15, targetPromo.codice);
+
+      // Step 1: prepare
+      setStep('prepare');
+      await new Promise(r => setTimeout(r, 200)); // let UI render
+
+      // Step 2: build payload with top-15 candidates
+      setStep('payload');
+      const payload = buildAIChannelPayload(channel, weights, 15, promoCode);
       if (payload.promos.length === 0) {
         setThinking(false);
-        setAiError(`La promo ${targetPromo.codice} non ha sezioni/candidati da analizzare.`);
+        setAiError(`La promo ${promoCode} non ha sezioni/candidati da analizzare.`);
         return;
       }
       setLastPayload(payload);
+
+      // Compute stats to show user what's being sent
+      const promoPayload = payload.promos[0];
+      const nSections = promoPayload.sections.length;
+      const nReparti = new Set(promoPayload.sections.flatMap(s => s.reparti.map(r => r.repartoCode))).size;
+      const nCandidates = promoPayload.sections.reduce((s, sec) => s + sec.reparti.reduce((t, r) => t + r.candidates.length, 0), 0);
+      const stats = { sections: nSections, candidates: nCandidates, reparti: nReparti };
+
+      // Step 3: send to Claude
+      setStep('send', stats);
+      await new Promise(r => setTimeout(r, 300));
+
+      // Step 4: thinking (set before await — the model is working)
+      setStep('thinking', stats);
+
+      // Kick off a timer that moves to 'waiting' after a few seconds to
+      // indicate the model is still reasoning.
+      const waitingTimer = setTimeout(() => setStep('waiting', stats), 8000);
+
       const aiResult = await requestAIPlan(payload);
+      clearTimeout(waitingTimer);
+
+      // Step 5: received
+      setStep('received', stats);
       setLastAiResult(aiResult);
-      setAiProgress({ done: 1, total: 1, current: null });
+      await new Promise(r => setTimeout(r, 200));
+
+      // Step 6: assemble
+      setStep('assemble', stats);
       const result = assembleAIPlan(channel, aiResult, weights);
+      await new Promise(r => setTimeout(r, 200));
+
+      // Step 7: done
+      setStep('done', stats);
       finishPlan(result, result.insights);
       setAiProgress(null);
     } catch (err) {
@@ -554,7 +642,7 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
                 </div>
               )}
 
-              {thinking && <div className="flex-1 flex items-center justify-center"><ThinkingAnimation progress={aiProgress} /></div>}
+              {thinking && (engine === 'ai' && aiProgress ? <AIThinkingPanel progress={aiProgress} /> : <div className="flex-1 flex items-center justify-center"><HeuristicThinking /></div>)}
 
               {plan && (
                 <>

@@ -49,6 +49,8 @@ const SECTION_TO_SPAZI_KEY = {
   s4: 'Speciale4_Affiancamento',
 };
 
+const SECTION_KEYS = ['tema', 'sotto', 's1', 's2', 's3', 's4'];
+
 // Synthetic-budget ratios: when the Excel data has no explicit allocation
 // for a non-Tema section, we estimate the budget as a fraction of the Tema
 // budget for that same reparto. Allows the AI to propose assignments across
@@ -61,64 +63,147 @@ const SYNTHETIC_BUDGET_RATIOS = {
   s4: 0.20,
 };
 
-// Get budget for (promo, sezione, anagrafica reparto code)
-// Returns { prod, card, synthetic } — `synthetic: true` when derived from Tema.
-export function getBudgetForRepartoSezione(promoCode, sectionKey, anagRepartoCode) {
-  const sezioneSpazi = SECTION_TO_SPAZI_KEY[sectionKey];
-  if (!sezioneSpazi) return { prod: 0, card: 0, synthetic: false };
-  const promoSpazi = SPAZI[promoCode];
-  if (!promoSpazi) return { prod: 0, card: 0, synthetic: false };
+// Family count per anagrafica reparto (used as split weight)
+const REPARTO_WEIGHT = Object.fromEntries(REPARTI.map(r => [r.code, r.count || 1]));
 
-  const mappedReparti = REPARTO_TO_SPAZI[anagRepartoCode] || [];
-
-  // 1. Try the real Excel data for this section
-  const sez = promoSpazi[sezioneSpazi];
-  if (sez) {
-    let prod = 0, card = 0;
-    for (const r of mappedReparti) {
-      const v = sez.byReparto[r];
-      if (v) { prod += v.prod || 0; card += v.card || 0; }
+// Reverse map: spazi reparto -> [anagrafica reparto codes that include it]
+const SPAZI_TO_REPARTI = (() => {
+  const m = {};
+  for (const [anag, spaziList] of Object.entries(REPARTO_TO_SPAZI)) {
+    for (const sp of spaziList) {
+      if (!m[sp]) m[sp] = [];
+      m[sp].push(anag);
     }
-    if (prod > 0 || card > 0) return { prod, card, synthetic: false };
   }
+  return m;
+})();
 
-  // 2. Fallback: synthesise from Tema using a per-section ratio
-  const ratio = SYNTHETIC_BUDGET_RATIOS[sectionKey];
-  if (!ratio) return { prod: 0, card: 0, synthetic: false };
-  const temaSez = promoSpazi['Tema'];
-  if (!temaSez) return { prod: 0, card: 0, synthetic: false };
-  let temaProd = 0, temaCard = 0;
-  for (const r of mappedReparti) {
-    const v = temaSez.byReparto[r];
-    if (v) { temaProd += v.prod || 0; temaCard += v.card || 0; }
+// Largest-remainder integer split of `total` across `weights`, preserving the sum.
+function largestRemainderSplit(total, weights) {
+  const n = weights.length;
+  if (n === 0) return [];
+  if (total <= 0) return weights.map(() => 0);
+  const sumW = weights.reduce((a, b) => a + b, 0);
+  // Even split when all weights are zero
+  const raw = sumW === 0
+    ? weights.map(() => total / n)
+    : weights.map(w => (total * w) / sumW);
+  const floors = raw.map(Math.floor);
+  let assigned = floors.reduce((a, b) => a + b, 0);
+  let remaining = total - assigned;
+  const order = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac);
+  const result = [...floors];
+  for (let k = 0; k < remaining; k++) {
+    result[order[k % n].i] += 1;
   }
-  if (temaProd === 0) return { prod: 0, card: 0, synthetic: false };
-  return {
-    prod: Math.max(1, Math.round(temaProd * ratio)),
-    card: Math.max(0, Math.round(temaCard * ratio)),
-    synthetic: true,
-  };
+  return result;
 }
 
-// Promo total budget per sezione (sum of all reparti, real + synthetic)
-export function getPromoTotalBudget(promoCode, sectionKey) {
-  const sezioneSpazi = SECTION_TO_SPAZI_KEY[sectionKey];
-  if (!sezioneSpazi) return { prod: 0, card: 0, pag: 0 };
-  const sez = SPAZI[promoCode]?.[sezioneSpazi];
-  if (sez && (sez.prod > 0 || sez.card > 0)) {
-    return { prod: sez.prod, card: sez.card, pag: sez.pag, synthetic: false };
-  }
-  // Synthetic: aggregate per-reparto synthetic budgets
-  const ratio = SYNTHETIC_BUDGET_RATIOS[sectionKey];
-  if (!ratio) return { prod: 0, card: 0, pag: 0, synthetic: false };
-  const temaSez = SPAZI[promoCode]?.['Tema'];
-  if (!temaSez) return { prod: 0, card: 0, pag: 0, synthetic: false };
-  return {
-    prod: Math.round(temaSez.prod * ratio),
-    card: Math.round(temaSez.card * ratio),
-    pag: Math.round((temaSez.pag || 0) * ratio),
-    synthetic: true,
+// ----------------------------------------------------------------------------
+// Single source of truth for budgets.
+// Splits each spazi-reparto budget among the anagrafica reparti that map to it
+// (by family-count weight, largest-remainder) so that the per-reparto budgets
+// sum EXACTLY to the assignable section total. No more double-counting of
+// shared spazi reparti (e.g. "No Food" shared by 4 reparti, "B.co Pesce" by 2).
+// Cached per promoCode.
+// ----------------------------------------------------------------------------
+const _budgetCache = new Map();
+
+export function buildPromoBudget(promoCode) {
+  if (_budgetCache.has(promoCode)) return _budgetCache.get(promoCode);
+
+  const promoSpazi = SPAZI[promoCode] || {};
+  // byReparto[anagCode][sectionKey] = { prod, card, synthetic }
+  const byReparto = {};
+  // bySection[sectionKey] = { prod, card, synthetic }
+  const bySection = {};
+
+  const ensure = (anag) => {
+    if (!byReparto[anag]) byReparto[anag] = {};
+    return byReparto[anag];
   };
+
+  // 1. Real sections: split each mapped spazi-reparto budget across its anag reparti
+  for (const sectionKey of SECTION_KEYS) {
+    const sez = promoSpazi[SECTION_TO_SPAZI_KEY[sectionKey]];
+    if (!sez) continue;
+    let sectionHasReal = false;
+    // For every spazi reparto that maps to ≥1 anag reparto, split its budget
+    for (const [sp, anagList] of Object.entries(SPAZI_TO_REPARTI)) {
+      const v = sez.byReparto?.[sp];
+      if (!v) continue;
+      const prod = v.prod || 0;
+      const card = v.card || 0;
+      if (prod === 0 && card === 0) continue;
+      sectionHasReal = true;
+      const weights = anagList.map(a => REPARTO_WEIGHT[a] || 1);
+      const prodSplit = largestRemainderSplit(prod, weights);
+      const cardSplit = largestRemainderSplit(card, weights);
+      anagList.forEach((a, idx) => {
+        const slot = ensure(a);
+        if (!slot[sectionKey]) slot[sectionKey] = { prod: 0, card: 0, synthetic: false };
+        slot[sectionKey].prod += prodSplit[idx];
+        slot[sectionKey].card += cardSplit[idx];
+      });
+    }
+    if (sectionHasReal) {
+      // mark section as real (totals computed later from per-reparto sums)
+      bySection[sectionKey] = { prod: 0, card: 0, synthetic: false };
+    }
+  }
+
+  // 2. Synthetic sections (present in promo metadata but no real spazi budget):
+  //    derive each reparto's budget from its real Tema budget × ratio.
+  // (Caller passes the active sections; here we synthesise for any section key
+  //  that has a ratio and is not already real, using Tema as the base.)
+  for (const sectionKey of SECTION_KEYS) {
+    if (sectionKey === 'tema') continue;
+    if (bySection[sectionKey]) continue; // already real
+    const ratio = SYNTHETIC_BUDGET_RATIOS[sectionKey];
+    if (!ratio) continue;
+    let any = false;
+    for (const anag of Object.keys(byReparto)) {
+      const tema = byReparto[anag]['tema'];
+      if (!tema || tema.prod === 0) continue;
+      const prod = Math.round(tema.prod * ratio);
+      const card = Math.round(tema.card * ratio);
+      if (prod === 0 && card === 0) continue;
+      byReparto[anag][sectionKey] = { prod, card, synthetic: true };
+      any = true;
+    }
+    if (any) bySection[sectionKey] = { prod: 0, card: 0, synthetic: true };
+  }
+
+  // 3. Compute section totals as the EXACT sum of per-reparto budgets.
+  for (const sectionKey of Object.keys(bySection)) {
+    let prod = 0, card = 0;
+    for (const anag of Object.keys(byReparto)) {
+      const s = byReparto[anag][sectionKey];
+      if (s) { prod += s.prod; card += s.card; }
+    }
+    bySection[sectionKey].prod = prod;
+    bySection[sectionKey].card = card;
+  }
+
+  const result = { byReparto, bySection };
+  _budgetCache.set(promoCode, result);
+  return result;
+}
+
+// Get budget for (promo, sezione, anagrafica reparto code)
+// Returns { prod, card, synthetic }.
+export function getBudgetForRepartoSezione(promoCode, sectionKey, anagRepartoCode) {
+  const { byReparto } = buildPromoBudget(promoCode);
+  return byReparto[anagRepartoCode]?.[sectionKey] || { prod: 0, card: 0, synthetic: false };
+}
+
+// Promo total budget per sezione (exact sum of per-reparto assignable budgets)
+export function getPromoTotalBudget(promoCode, sectionKey) {
+  const { bySection } = buildPromoBudget(promoCode);
+  const s = bySection[sectionKey];
+  return s ? { prod: s.prod, card: s.card, pag: 0, synthetic: s.synthetic } : { prod: 0, card: 0, pag: 0 };
 }
 
 export default function useGridState(selectedPromo) {

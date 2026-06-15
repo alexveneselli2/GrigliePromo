@@ -8,7 +8,7 @@ import PROMOZIONI from '../data/promozioni';
 import ANAGRAFICA from '../data/anagrafica';
 import METRICS from '../data/metrics';
 import { REPARTO_TO_SPAZI } from '../data/reparti';
-import { getSectionsForPromo, getBudgetForRepartoSezione } from '../hooks/useGridState';
+import { getSectionsForPromo, getBudgetForRepartoSezione, getPromoTotalBudget } from '../hooks/useGridState';
 
 export const DEFAULT_WEIGHTS = {
   sales: 0.22,
@@ -331,8 +331,18 @@ export function generateRichPlan(channelCode, weights = DEFAULT_WEIGHTS) {
         repartoFamilies[f.rc].push(f);
       }
 
+      // Defensive section-level cap: never allocate more than the section total
+      // (per-reparto budgets already sum to this, but this guards against drift).
+      const sectionTotal = getPromoTotalBudget(promoCode, sec.key);
+      let sectionProdLeft = sectionTotal.prod;
+      let sectionCardLeft = sectionTotal.card;
+
       for (const [repartoCode, repFamilies] of Object.entries(repartoFamilies)) {
-        const budget = getBudgetForRepartoSezione(promoCode, sec.key, repartoCode);
+        const rawBudget = getBudgetForRepartoSezione(promoCode, sec.key, repartoCode);
+        const budget = {
+          prod: Math.min(rawBudget.prod, sectionProdLeft),
+          card: Math.min(rawBudget.card, sectionCardLeft),
+        };
         if (!budget.prod) continue;
 
         const candidates = repFamilies
@@ -384,6 +394,8 @@ export function generateRichPlan(channelCode, weights = DEFAULT_WEIGHTS) {
           picks.push({ ...cand, prodCount, cardCount });
           slotsLeft -= prodCount;
           cardLeft -= cardCount;
+          sectionProdLeft -= prodCount;
+          sectionCardLeft -= cardCount;
         }
 
         const alternatives = candidates.slice(picks.length, picks.length + 3);

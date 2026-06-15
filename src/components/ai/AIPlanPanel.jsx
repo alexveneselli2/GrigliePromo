@@ -870,82 +870,129 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
           )}
 
           {tab === 'about' && (
-            <div className="flex-1 overflow-y-auto p-6 max-w-3xl text-xs text-gray-600 space-y-4 leading-relaxed">
-              <div>
-                <h3 className="text-sm font-bold text-dimar-dark mb-2">🤖 Modello multi-KPI predittivo</h3>
-                <p>
-                  Per ogni combinazione <strong>(famiglia × promo × sezione)</strong> il motore calcola
-                  uno <strong>score</strong> aggregando 6 segnali positivi e 2 penalty:
-                </p>
-              </div>
+            <div className="flex-1 overflow-y-auto p-6 max-w-3xl text-xs text-gray-600 space-y-5 leading-relaxed">
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                  <h4 className="text-xs font-bold text-emerald-800 mb-1">Segnali positivi</h4>
-                  <ul className="text-[11px] space-y-1 text-emerald-900">
-                    <li>📊 Vendite normalizzate per reparto</li>
-                    <li>💰 Margine</li>
-                    <li>🧾 Penetrazione scontrini (% cassieri)</li>
-                    <li>📅 Stagionalità (Gaussiana sul mese dominante)</li>
-                    <li>🎯 Affinità tematica (keyword matching)</li>
-                    <li>⭐ Boost ruolo (A/B/C)</li>
-                  </ul>
+              {/* AI (Claude) mode */}
+              <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-200 rounded-xl p-5">
+                <h3 className="text-sm font-bold text-violet-800 mb-3 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  </svg>
+                  Modalità AI (Claude)
+                </h3>
+                <p className="mb-3">
+                  Claude Opus 4.8, il modello di ragionamento avanzato di Anthropic, analizza la promo selezionata con <strong>extended thinking</strong> (ragionamento profondo prima di rispondere).
+                </p>
+
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">1. Prefiltro (browser)</h4>
+                    <p>Per ogni sezione × reparto, un algoritmo locale calcola uno score euristico per tutte le 307 famiglie e seleziona i <strong>top-10 candidati</strong>. Per ognuno include: vendite, margine, scontrini, andamento M1-M4, recency, elasticità promo, target demografico, segmento prezzo e trend margine.</p>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">2. Contesto aggiuntivo</h4>
+                    <p>Al payload si aggiungono: <strong>storico anno precedente</strong> (ricavi, lift, card), <strong>attività concorrenza</strong>, <strong>contesto stagionale</strong>, <strong>benchmark per reparto</strong> (margine medio, lift tipico, penetrazione card, trend). Se l'utente ha già piazzato famiglie manualmente, queste vengono marcate come <strong>"locked"</strong> (immodificabili).</p>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">3. Pesi KPI dell'utente</h4>
+                    <p>I pesi configurati nel tab "Pesi KPI" vengono <strong>serializzati con etichette esplicite</strong> e ordinati per priorità. Claude li riceve come istruzione diretta: "dai più peso ai criteri con valore alto". Modificare i pesi cambia realmente il comportamento del modello.</p>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">4. Chiamata a Claude</h4>
+                    <p>Il payload viene inviato a <code className="bg-violet-100 px-1 rounded">claude-opus-4-8</code> via API Anthropic con:</p>
+                    <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                      <li><strong>Extended thinking</strong> (adattivo) — Claude ragiona internamente su budget, rotazione e trade-off prima di rispondere</li>
+                      <li><strong>Structured output</strong> (schema Zod) — la risposta è vincolata a un formato JSON preciso, validato automaticamente</li>
+                      <li><strong>Streaming</strong> con heartbeat — evita timeout su risposte lunghe</li>
+                      <li><strong>Prompt caching</strong> — il system prompt è riusato su più chiamate senza ri-elaborazione</li>
+                      <li><strong>max_tokens: 32.000</strong> — spazio abbondante per l'output</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">5. Regole nel prompt</h4>
+                    <p>Il system prompt impone a Claude:</p>
+                    <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                      <li><strong>Usare TUTTI gli slot</strong> — prodCount deve eguagliare budgetProd, nessuno slot vuoto</li>
+                      <li><strong>Rispettare i locked</strong> — le selezioni manuali sono intoccabili</li>
+                      <li><strong>Affinità semantica</strong> — non solo keyword: ragionare sul significato (es. "Birra" + "Aperitivo estivo")</li>
+                      <li>Penalizzare famiglie già in volantino recente (rotazione)</li>
+                      <li>Bilanciare il target demografico nel volantino</li>
+                      <li>1-3 motivazioni concrete per ogni scelta, con KPI reali</li>
+                      <li>Stima d'impatto (ricavo, probabilità card, engagement)</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-bold text-violet-700 uppercase tracking-wider mb-1">6. Output e assemblaggio</h4>
+                    <p>Claude restituisce per ogni pick: famiglia, sezione, slot PROD/CARD, score 0-100, confidence 0-100, array di motivazioni, warning, stima impatto. Il frontend <strong>clampa</strong> i conteggi ai budget reali (protezione) e assembla le card con i KPI fattuali dal dataset.</p>
+                  </div>
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <h4 className="text-xs font-bold text-amber-800 mb-1">Penalty</h4>
-                  <ul className="text-[11px] space-y-1 text-amber-900">
-                    <li>⏱  Recency: penalizza famiglie già in volantino recente</li>
-                    <li>🔄 Saturazione: penalizza riuso eccessivo nel piano</li>
-                  </ul>
+              </div>
+
+              {/* Heuristic mode */}
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                <h3 className="text-sm font-bold text-dimar-dark mb-3">Modalità Euristico locale</h3>
+                <p className="mb-2">
+                  Algoritmo deterministico che gira interamente nel browser, senza chiamate API.
+                </p>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <h4 className="text-[10px] font-bold text-emerald-800 mb-1 uppercase tracking-wider">Segnali positivi</h4>
+                    <ul className="text-[11px] space-y-0.5 text-emerald-900">
+                      <li>Vendite normalizzate per reparto</li>
+                      <li>Margine %</li>
+                      <li>Penetrazione scontrini</li>
+                      <li>Stagionalità (Gaussiana su M1-M4)</li>
+                      <li>Affinità tematica (keyword matching)</li>
+                      <li>Boost ruolo promo (A/B/C)</li>
+                    </ul>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <h4 className="text-[10px] font-bold text-amber-800 mb-1 uppercase tracking-wider">Penalty</h4>
+                    <ul className="text-[11px] space-y-0.5 text-amber-900">
+                      <li>Recency (già in volantino recente)</li>
+                      <li>Saturazione (riuso cross-promo)</li>
+                    </ul>
+                  </div>
+                </div>
+                <p>
+                  Lo score è una somma pesata (pesi configurabili). Confidence = gap vs la migliore alternativa. Impatto = simulazione locale (vendite/giorno × durata × uplift). Analizza tutte le promo del canale in sequenza con penalty di saturazione crescente.
+                </p>
+              </div>
+
+              {/* Confronto */}
+              <div>
+                <h3 className="text-sm font-bold text-dimar-dark mb-2">Confronto tra le due modalità</h3>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="text-left px-3 py-2 font-bold text-gray-500"></th>
+                        <th className="text-left px-3 py-2 font-bold text-gray-500">Euristico</th>
+                        <th className="text-left px-3 py-2 font-bold text-violet-600">AI (Claude)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-gray-700">
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Velocità</td><td className="px-3 py-1.5">~1 secondo</td><td className="px-3 py-1.5">~40-90 secondi</td></tr>
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Affinità tematica</td><td className="px-3 py-1.5">Keyword hard-coded</td><td className="px-3 py-1.5">Semantica (capisce il significato)</td></tr>
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Motivazioni</td><td className="px-3 py-1.5">Template da KPI</td><td className="px-3 py-1.5">Scritte da Claude, specifiche</td></tr>
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Impatto</td><td className="px-3 py-1.5">Formula locale</td><td className="px-3 py-1.5">Stima AI con contesto</td></tr>
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Selezioni manuali</td><td className="px-3 py-1.5">Non considerate</td><td className="px-3 py-1.5">Locked e rispettate</td></tr>
+                      <tr className="border-b border-gray-50"><td className="px-3 py-1.5 font-semibold">Copertura budget</td><td className="px-3 py-1.5">Best-effort</td><td className="px-3 py-1.5">100% slot riempiti</td></tr>
+                      <tr><td className="px-3 py-1.5 font-semibold">Costo</td><td className="px-3 py-1.5">Zero</td><td className="px-3 py-1.5">~$0.10-0.30 per promo</td></tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
+              {/* Workflow */}
               <div>
-                <h3 className="text-sm font-bold text-dimar-dark mb-2">🎯 Confidence</h3>
-                <p>
-                  Per ogni suggerimento viene calcolata una <strong>confidenza</strong>
-                  che misura quanto è chiaro il "vincitore" rispetto alle alternative:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1">
-                  <li><strong>Alta (≥80%)</strong>: chiaro vincitore, gap netto vs alternative</li>
-                  <li><strong>Media (55-79%)</strong>: scelta solida ma alternative vicine</li>
-                  <li><strong>Bassa (&lt;55%)</strong>: caso ambiguo, suggerita review manuale</li>
-                </ul>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-dimar-dark mb-2">📈 Impatto previsto (simulato)</h3>
-                <p>
-                  Per ogni suggerimento viene simulato l'impatto atteso:
-                </p>
-                <ul className="list-disc pl-5 mt-2 space-y-1">
-                  <li><strong>Ricavo atteso</strong>: vendite/giorno × durata × uplift tematico+stagionale</li>
-                  <li><strong>Probabilità card</strong>: derivata dalla penetrazione scontrini</li>
-                  <li><strong>Engagement</strong>: mix scontrini + affinità tematica</li>
-                </ul>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-dimar-dark mb-2">🌐 Ottimizzazione di portafoglio</h3>
-                <p>
-                  Le promo del canale sono processate in <strong>ordine cronologico</strong>.
-                  Per ogni (sezione × reparto) si selezionano le top-N famiglie con punteggio
-                  più alto fino al budget PROD. Le CARD sono assegnate alle PROD con miglior
-                  mix vendite/scontrini.
-                </p>
-                <p className="mt-2">
-                  Una famiglia usata in promo precedenti del piano riceve una penalty crescente,
-                  garantendo <strong>rotazione tra volantini</strong>.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-dimar-dark mb-2">✅ Workflow umano-AI</h3>
+                <h3 className="text-sm font-bold text-dimar-dark mb-2">Workflow</h3>
                 <p>
                   Il piano viene proposto con <strong>tutti i suggerimenti pre-accettati</strong>.
-                  L'utente può rifiutare individualmente quelli problematici, filtrare per
-                  confidenza/avvisi, e infine applicare solo gli accettati a tutte le promo
-                  con un click.
+                  L'utente può accettare/rifiutare individualmente, filtrare per confidenza o avvisi,
+                  consultare il <strong>Report dettaglio</strong> (con prompt, parametri e ragionamenti),
+                  e infine applicare le scelte alla griglia con un click. Lo stato è persistente nella sessione:
+                  chiudere e riaprire il pannello non perde nulla.
                 </p>
               </div>
             </div>

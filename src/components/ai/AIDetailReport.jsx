@@ -1,767 +1,108 @@
 import { useState, useMemo } from 'react';
-import { fmtEuro, fmtPct, fmtInt } from '../../utils';
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const SECTION_GRADIENTS = {
-  red:    'from-dimar-red to-rose-500',
-  orange: 'from-orange-600 to-orange-400',
-  amber:  'from-amber-600 to-amber-400',
-  green:  'from-emerald-600 to-emerald-400',
-  teal:   'from-teal-600 to-teal-400',
-  blue:   'from-blue-600 to-blue-400',
-};
-
-const SECTION_COLOR_MAP = {
-  tema:   'red',
-  sotto:  'orange',
-  s1:     'amber',
-  s2:     'green',
-  s3:     'teal',
-  s4:     'blue',
-};
+import { fmtEuro, fmtPct } from '../../utils';
 
 const WEIGHT_LABELS = {
-  sales:             'Vendite',
-  margin:            'Margine',
-  scontrini:         'Scontrini',
-  seasonality:       'Stagionalità',
-  themeAffinity:     'Affinità tema',
-  roleBoost:         'Ruolo',
-  recencyPenalty:    'Recency penalty',
-  saturationPenalty: 'Saturaz. penalty',
+  sales: 'Vendite', margin: 'Margine', scontrini: 'Scontrini',
+  seasonality: 'Stagionalità', themeAffinity: 'Affinità tema',
+  roleBoost: 'Ruolo', recencyPenalty: 'Recency penalty', saturationPenalty: 'Saturaz. penalty',
 };
 
-const WEIGHT_COLORS = {
-  sales:             'bg-dimar-red',
-  margin:            'bg-emerald-500',
-  scontrini:         'bg-blue-500',
-  seasonality:       'bg-amber-500',
-  themeAffinity:     'bg-purple-500',
-  roleBoost:         'bg-pink-500',
-  recencyPenalty:    'bg-orange-400',
-  saturationPenalty: 'bg-gray-400',
-};
+const SYSTEM_PROMPT_TEXT = `Sei un category manager esperto della GDO italiana (catena Dimar). Devi decidere quali famiglie merceologiche inserire in ogni sezione di un volantino promozionale e con quanti spazi (PROD = spazi a volantino, CARD = spazi con carta fedeltà).
 
-// ─── Small helpers ────────────────────────────────────────────────────────────
+Regole ferree:
+- DEVI USARE TUTTI GLI SPAZI DISPONIBILI: prodCount = budgetProd, cardCount = budgetCard. Nessuno slot vuoto.
+- Se presenti "locked" (selezioni manuali), sono IMMODIFICABILI. Riportale esattamente e assegna il residuo.
+- Concentra più spazi sulle famiglie più forti; assegna 1 alle marginali; NON lasciare fuori famiglie se ci sono spazi da riempire.
 
-function confidenceBand(v) {
-  // v may be 0-1 or 0-100 from Claude
-  const n = v > 1 ? v / 100 : v;
-  if (n >= 0.75) return { label: 'Alta',  cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
-  if (n >= 0.5)  return { label: 'Media', cls: 'bg-amber-100   text-amber-700   border-amber-200'   };
-  return              { label: 'Bassa', cls: 'bg-orange-100  text-orange-700  border-orange-200'  };
-}
+Criteri di valutazione (in ordine di priorità secondo i pesi utente):
+- VENDITE, MARGINE, SCONTRINI, STAGIONALITÀ (M1-M4), AFFINITÀ TEMATICA (semantica, non solo keyword), ELASTICITÀ PROMO, ROTAZIONE, PROFILO CLIENTE (targetDemo), TREND MARGINE.
 
-function normScore(v) {
-  return v > 1 ? v / 100 : v;   // normalise Claude's 0-100 to 0-1 if needed
-}
+Contesto aggiuntivo: storico anno precedente, concorrenza, contesto stagionale, benchmark reparto.
 
-function sectionColorKey(sectionKey) {
-  return SECTION_COLOR_MAP[sectionKey] ?? 'blue';
-}
+Per ogni scelta: 1-3 motivazioni concrete + stima impatto (ricavo €k, prob. card, engagement).`;
 
-function SectionBadge({ sectionKey, label }) {
-  const colorKey = sectionColorKey(sectionKey);
-  const grad = SECTION_GRADIENTS[colorKey] ?? SECTION_GRADIENTS.blue;
-  return (
-    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full bg-gradient-to-r ${grad} text-white`}>
-      {label ?? sectionKey}
-    </span>
-  );
-}
-
-function ConfidenceBadge({ value }) {
-  const { label, cls } = confidenceBand(value);
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${cls}`}>
-      {label}
-    </span>
-  );
-}
-
-// ─── Section wrapper ──────────────────────────────────────────────────────────
-
-function ReportSection({ title, icon, children, defaultOpen = true }) {
+function Section({ title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="mb-6 print:mb-4 break-inside-avoid-page">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 text-left mb-3 group print:pointer-events-none"
-      >
-        <span className="text-base">{icon}</span>
-        <h2 className="text-sm font-bold text-dimar-dark tracking-wide uppercase flex-1">
-          {title}
-        </h2>
-        <span className="text-gray-300 group-hover:text-gray-500 transition-colors print:hidden text-xs">
-          {open ? '▲' : '▼'}
-        </span>
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 text-left mb-3 group print:pointer-events-none">
+        <h2 className="text-sm font-bold text-dimar-dark tracking-wide uppercase flex-1">{title}</h2>
+        <span className="text-gray-300 group-hover:text-gray-500 print:hidden text-xs">{open ? '▲' : '▼'}</span>
       </button>
-      {open && <div className="animate-expand">{children}</div>}
+      {open && children}
     </section>
   );
 }
 
-// ─── Section 1 helpers ────────────────────────────────────────────────────────
-
-function HeaderSection({ promoCode, plan, aiResult, payload }) {
-  const promo = plan?.channelPromos?.find(p => p.codicePromo === promoCode);
-  const ts = new Date().toLocaleString('it-IT', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-
-  const canale = payload?.promos?.[0]?.canale ?? promo?.canale ?? '—';
-  const tema   = payload?.promos?.[0]?.tema   ?? promo?.tema   ?? '—';
-  const di     = promo?.dataInizio ?? payload?.promos?.[0]?.dataInizio ?? '';
-  const df     = promo?.dataFine   ?? payload?.promos?.[0]?.dataFine   ?? '';
-
-  const fmtDate = s => s
-    ? new Date(s).toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '—';
-
+function CodeBlock({ children }) {
   return (
-    <header className="rounded-2xl overflow-hidden mb-6 shadow-lg print:shadow-none print:rounded-none print:border print:border-gray-200">
-      {/* Gradient bar */}
-      <div className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 px-6 py-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-violet-200 text-xs font-semibold uppercase tracking-widest mb-1">
-              Report Analisi AI
-            </p>
-            <h1 className="text-white text-2xl font-extrabold leading-tight tracking-tight">
-              {promoCode}
-            </h1>
-            {tema && (
-              <p className="text-violet-100 text-sm mt-1 font-medium">{tema}</p>
-            )}
-            {(di || df) && (
-              <p className="text-violet-200 text-xs mt-1">
-                {fmtDate(di)} → {fmtDate(df)}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col items-end gap-2 min-w-max">
-            {/* Engine badge */}
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 text-white text-[11px] font-semibold border border-white/20">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              thinking: adaptive · top-15
-            </span>
-            {canale && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/15 text-white text-[11px] font-medium border border-white/20">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
-                </svg>
-                {canale}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Meta strip */}
-      <div className="bg-white px-6 py-3 flex items-center gap-6 flex-wrap border-t border-gray-100">
-        <div className="flex items-center gap-2 text-[11px]">
-          <svg className="w-3.5 h-3.5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
-          </svg>
-          <span className="text-gray-400">Modello</span>
-          <span className="font-semibold text-dimar-dark">
-            {aiResult?.model ?? 'claude-opus-4-8'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-[11px]">
-          <svg className="w-3.5 h-3.5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-gray-400">Generato</span>
-          <span className="font-semibold text-dimar-dark">{ts}</span>
-        </div>
-        <div className="ml-auto">
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">
-            AI · claude-opus-4-8
-          </span>
-        </div>
-      </div>
-    </header>
+    <pre className="bg-gray-900 text-gray-100 text-[10px] leading-relaxed rounded-lg p-4 overflow-x-auto whitespace-pre-wrap font-mono print:bg-gray-100 print:text-gray-800 print:border print:border-gray-300">{children}</pre>
   );
 }
 
-// ─── Section 2: Input Data ────────────────────────────────────────────────────
-
-function InputDataSection({ payload, weights }) {
-  const [expandCandidates, setExpandCandidates] = useState(false);
-
+export default function AIDetailReport({ promoCode, plan, payload, weights, aiResult, onClose }) {
+  const ts = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const promoPayload = payload?.promos?.[0];
   const sections = promoPayload?.sections ?? [];
-
-  // Aggregate stats
-  const totalCandidates = useMemo(() =>
-    sections.reduce((sum, s) =>
-      sum + (s.reparti ?? []).reduce((rs, r) => rs + (r.candidates ?? []).length, 0), 0),
-    [sections]);
-
-  const totalReparti = useMemo(() =>
-    sections.reduce((sum, s) => sum + (s.reparti ?? []).length, 0),
-    [sections]);
-
-  // Flatten top-3 candidates per section for the table
-  const topCandidates = useMemo(() =>
-    sections.flatMap(s =>
-      (s.reparti ?? []).flatMap(r =>
-        (r.candidates ?? []).slice(0, 3).map(c => ({
-          ...c,
-          sectionKey:   s.key,
-          sectionLabel: s.label ?? s.key,
-          repartoName:  r.repartoName,
-        }))
-      )
-    ),
-    [sections]);
-
-  return (
-    <div className="space-y-4">
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Candidati totali', value: fmtInt(totalCandidates), icon: '🧾', color: 'violet' },
-          { label: 'Sezioni',          value: fmtInt(sections.length),  icon: '📂', color: 'fuchsia' },
-          { label: 'Reparti',          value: fmtInt(totalReparti),     icon: '🏷️', color: 'pink'    },
-        ].map(({ label, value, icon, color }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm text-center">
-            <div className="text-xl mb-1">{icon}</div>
-            <div className={`text-2xl font-extrabold text-${color}-600 tabular-nums`}>{value}</div>
-            <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mt-0.5">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Budget per section table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-          <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-            Budget per sezione / reparto
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-4 py-2 font-semibold text-gray-400">Sezione</th>
-                <th className="text-left px-4 py-2 font-semibold text-gray-400">Reparto</th>
-                <th className="text-right px-4 py-2 font-semibold text-gray-400">Slot PROD</th>
-                <th className="text-right px-4 py-2 font-semibold text-gray-400">Slot CARD</th>
-                <th className="text-right px-4 py-2 font-semibold text-gray-400">Candidati</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sections.flatMap(s =>
-                (s.reparti ?? []).map((r, ri) => (
-                  <tr key={`${s.key}-${r.repartoCode}`} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
-                    {ri === 0 && (
-                      <td className="px-4 py-2 align-top" rowSpan={s.reparti.length}>
-                        <SectionBadge sectionKey={s.key} label={s.label ?? s.short ?? s.key} />
-                      </td>
-                    )}
-                    <td className="px-4 py-2 text-gray-600 font-medium">{r.repartoName}</td>
-                    <td className="px-4 py-2 text-right">
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded bg-dimar-red text-white">
-                        {r.budgetProd ?? 0}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded bg-rose-500 text-white">
-                        {r.budgetCard ?? 0}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-right text-gray-500 tabular-nums font-mono">
-                      {(r.candidates ?? []).length}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Candidate KPI table – collapsible */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <button
-          onClick={() => setExpandCandidates(o => !o)}
-          className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100 hover:bg-gray-100 transition-colors"
-        >
-          <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-            Top candidati per sezione (KPI)
-          </span>
-          <span className="text-[10px] text-gray-400 font-medium print:hidden">
-            {expandCandidates ? '▲ Comprimi' : '▼ Espandi'}
-          </span>
-        </button>
-        {expandCandidates && (
-          <div className="overflow-x-auto animate-expand">
-            <table className="w-full text-[11px]">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">FC</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Famiglia</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Sezione</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Reparto</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">Vendite (€)</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">Margine</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">Scontrini</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">M1</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">M2</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">M3</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">M4</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topCandidates.map((c, idx) => (
-                  <tr key={`${c.fc}-${idx}`} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
-                    <td className="px-4 py-2 font-mono font-bold text-dimar-dark">{c.fc}</td>
-                    <td className="px-4 py-2 text-gray-700 max-w-[160px] truncate">{c.fn}</td>
-                    <td className="px-4 py-2">
-                      <SectionBadge sectionKey={c.sectionKey} label={c.sectionLabel} />
-                    </td>
-                    <td className="px-4 py-2 text-gray-500">{c.repartoName}</td>
-                    <td className="px-4 py-2 text-right font-mono tabular-nums text-dimar-dark font-semibold">
-                      {fmtEuro(c.vendite)}
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono tabular-nums text-emerald-600">
-                      {c.marginePct != null ? `${c.marginePct.toLocaleString('it-IT', { maximumFractionDigits: 1 })}%` : '—'}
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono tabular-nums text-blue-600">
-                      {c.scontriniPct != null ? fmtPct(c.scontriniPct / 100) : '—'}
-                    </td>
-                    {(c.m ?? [0, 0, 0, 0]).map((mv, mi) => (
-                      <td key={mi} className="px-4 py-2 text-right font-mono tabular-nums text-gray-500">
-                        {fmtInt(mv)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* KPI Weights */}
-      {weights && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Pesi KPI utilizzati</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
-            {Object.entries(WEIGHT_LABELS).map(([key, label]) => {
-              const val = weights[key] ?? 0;
-              const pct = Math.round(val * 100);
-              return (
-                <div key={key} className="flex flex-col gap-1">
-                  <div className="flex items-center justify-between text-[10px]">
-                    <span className="text-gray-500 truncate">{label}</span>
-                    <span className="font-bold text-dimar-dark tabular-nums font-mono ml-1">{pct}%</span>
-                  </div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${WEIGHT_COLORS[key] ?? 'bg-gray-400'}`}
-                      style={{ width: `${Math.min(100, pct * 5)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Section 3: AI Reasoning ──────────────────────────────────────────────────
-
-function ConfidenceHistogram({ picks }) {
-  const bands = [
-    { key: 'alta',  label: 'Alta (≥75%)',  min: 0.75, color: 'bg-emerald-400' },
-    { key: 'media', label: 'Media (50–74%)', min: 0.5, color: 'bg-amber-400'   },
-    { key: 'bassa', label: 'Bassa (<50%)',   min: 0,   color: 'bg-orange-400'  },
-  ];
-
-  const counts = bands.map(b => ({
-    ...b,
-    count: picks.filter(p => {
-      const n = normScore(p.confidence ?? 0);
-      return n >= b.min && (b.min === 0 || n < (b.min === 0.75 ? 999 : 0.75));
-    }).length,
-  }));
-
-  // Fix: first band catches >=0.75, second 0.5–0.74, third <0.5
-  const correctCounts = [
-    { ...bands[0], count: picks.filter(p => normScore(p.confidence ?? 0) >= 0.75).length },
-    { ...bands[1], count: picks.filter(p => { const n = normScore(p.confidence ?? 0); return n >= 0.5 && n < 0.75; }).length },
-    { ...bands[2], count: picks.filter(p => normScore(p.confidence ?? 0) < 0.5).length },
-  ];
-
-  const maxCount = Math.max(...correctCounts.map(c => c.count), 1);
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-        Distribuzione confidence ({picks.length} picks)
-      </p>
-      <div className="flex items-end gap-3 h-20">
-        {correctCounts.map(({ key, label, count, color }) => (
-          <div key={key} className="flex flex-col items-center gap-1 flex-1">
-            <span className="text-[10px] font-bold text-dimar-dark tabular-nums">{count}</span>
-            <div className="w-full bg-gray-100 rounded-t overflow-hidden" style={{ height: '48px' }}>
-              <div
-                className={`w-full ${color} rounded-t transition-all duration-500`}
-                style={{ height: `${(count / maxCount) * 48}px`, marginTop: 'auto' }}
-              />
-            </div>
-            <span className="text-[9px] text-gray-400 text-center leading-tight">{label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AIReasoningSection({ promoCode, aiResult, plan }) {
-  const promoAI  = aiResult?.promos?.find(p => p.promoCode === promoCode);
-  const insight  = promoAI?.insight ?? plan?.insights?.find(i => i.type === 'positive')?.text;
-  const picks    = promoAI?.picks ?? [];
-
-  return (
-    <div className="space-y-4">
-      {/* Overall insight */}
-      {insight && (
-        <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <span className="text-violet-500 mt-0.5">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-            </span>
-            <p className="text-sm text-violet-900 leading-relaxed font-medium">{insight}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Confidence histogram */}
-      {picks.length > 0 && <ConfidenceHistogram picks={picks} />}
-
-      {/* Per-pick reasoning */}
-      {picks.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Ragionamento per pick
-            </span>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {picks.map((pick, idx) => {
-              const reasons = pick.reasons?.length ? pick.reasons : (pick.reason ? [pick.reason] : []);
-              return (
-                <div key={`${pick.fc}-${idx}`} className="px-4 py-3 hover:bg-gray-50/50 transition-colors">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className="font-mono font-bold text-[12px] text-dimar-dark">{pick.fc}</span>
-                    <SectionBadge sectionKey={pick.sectionKey} label={pick.sectionKey} />
-                    <ConfidenceBadge value={pick.confidence ?? 0} />
-                    <span className="text-[10px] text-gray-400 font-mono tabular-nums ml-auto">
-                      score: <strong className="text-dimar-dark">{Math.round(normScore(pick.score ?? 0) * 100)}</strong>/100
-                    </span>
-                  </div>
-                  {reasons.length > 0 && (
-                    <ul className="space-y-0.5 mb-2">
-                      {reasons.map((r, ri) => (
-                        <li key={ri} className="flex items-start gap-1.5 text-[11px] text-gray-600">
-                          <span className="text-emerald-500 mt-0.5 flex-shrink-0">✓</span>
-                          <span>{typeof r === 'string' ? r : r.text ?? ''}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {pick.warning && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1">
-                      <svg className="w-3 h-3 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <span>{pick.warning}</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {!picks.length && !insight && (
-        <p className="text-sm text-gray-400 italic py-4 text-center">
-          Nessun dato di ragionamento disponibile.
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ─── Section 4: Risultati ─────────────────────────────────────────────────────
-
-function BudgetProgressBar({ used, total, label }) {
-  const pct = total > 0 ? Math.min(1, used / total) : 0;
-  const isOver = used > total;
-  const barColor = isOver ? 'bg-dimar-red' : pct >= 0.9 ? 'bg-amber-400' : 'bg-emerald-400';
-  return (
-    <div className="flex items-center gap-3 text-[11px]">
-      <span className="w-24 text-gray-500 truncate shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${pct * 100}%` }}
-        />
-      </div>
-      <span className="w-20 text-right font-mono tabular-nums text-gray-600 shrink-0">
-        {used}/{total} slot
-      </span>
-      <span className={`w-10 text-right font-bold tabular-nums shrink-0 ${isOver ? 'text-dimar-red' : pct >= 0.9 ? 'text-amber-600' : 'text-emerald-600'}`}>
-        {Math.round(pct * 100)}%
-      </span>
-    </div>
-  );
-}
-
-function ResultsSection({ promoCode, aiResult, plan, payload }) {
-  const promoAI  = aiResult?.promos?.find(p => p.promoCode === promoCode);
-  const picks    = promoAI?.picks ?? [];
-  const sections = payload?.promos?.[0]?.sections ?? [];
-
-  // Aggregate totals
-  const totalProd  = picks.reduce((s, p) => s + (p.prodCount ?? 0), 0);
-  const totalCard  = picks.reduce((s, p) => s + (p.cardCount ?? 0), 0);
-  const totalFam   = new Set(picks.map(p => p.fc)).size;
-
-  // Budget utilisation per section
-  const sectionBudgets = useMemo(() => sections.map(s => {
-    const budProd = (s.reparti ?? []).reduce((sum, r) => sum + (r.budgetProd ?? 0), 0);
-    const budCard = (s.reparti ?? []).reduce((sum, r) => sum + (r.budgetCard ?? 0), 0);
-    const sectionPicks = picks.filter(p => p.sectionKey === s.key);
-    const usedProd = sectionPicks.reduce((sum, p) => sum + (p.prodCount ?? 0), 0);
-    const usedCard = sectionPicks.reduce((sum, p) => sum + (p.cardCount ?? 0), 0);
-    return { key: s.key, label: s.label ?? s.short ?? s.key, budProd, budCard, usedProd, usedCard };
-  }), [sections, picks]);
-
-  // Impact aggregates
-  const totalRevK  = picks.reduce((s, p) => s + (p.impact?.expectedRevenueK ?? 0), 0);
-  const avgCardProb = picks.length
-    ? picks.reduce((s, p) => s + (p.impact?.cardProb ?? 0), 0) / picks.length
-    : 0;
-  const avgEngagement = picks.length
-    ? picks.reduce((s, p) => s + (p.impact?.engagement ?? 0), 0) / picks.length
-    : 0;
-
-  // Enrich picks with family name from suggestions
-  const suggestions = plan?.richByPromo?.[promoCode] ?? [];
-  const enrichedPicks = picks.map(pick => {
-    const sug = suggestions.find(s => s.fc === pick.fc && s.sectionKey === pick.sectionKey)
-             ?? suggestions.find(s => s.fc === pick.fc);
-    return {
-      ...pick,
-      fn: sug?.family?.fn ?? pick.fn ?? pick.fc,
-      sectionLabel: sug?.sectionLabel ?? pick.sectionKey,
-    };
-  });
-
-  return (
-    <div className="space-y-4">
-      {/* Summary stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Famiglie sel.',  value: fmtInt(totalFam),  color: 'violet',  icon: '🛒' },
-          { label: 'Slot PROD tot.', value: fmtInt(totalProd), color: 'dimar',   icon: '📋' },
-          { label: 'Slot CARD tot.', value: fmtInt(totalCard), color: 'rose',    icon: '🃏' },
-        ].map(({ label, value, color, icon }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm text-center">
-            <div className="text-xl mb-1">{icon}</div>
-            <div className={`text-2xl font-extrabold tabular-nums ${color === 'dimar' ? 'text-dimar-red' : color === 'rose' ? 'text-rose-500' : 'text-violet-600'}`}>
-              {value}
-            </div>
-            <div className="text-[10px] text-gray-400 font-medium uppercase tracking-wide mt-0.5">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Budget utilisation per section */}
-      {sectionBudgets.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-            Utilizzo budget per sezione
-          </p>
-          <div className="space-y-2.5">
-            {sectionBudgets.map(sb => (
-              <div key={sb.key} className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <SectionBadge sectionKey={sb.key} label={sb.label} />
-                </div>
-                {sb.budProd > 0 && (
-                  <BudgetProgressBar used={sb.usedProd} total={sb.budProd} label="PROD" />
-                )}
-                {sb.budCard > 0 && (
-                  <BudgetProgressBar used={sb.usedCard} total={sb.budCard} label="CARD" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Top picks table */}
-      {enrichedPicks.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-            <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Selezioni AI — dettaglio
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">FC</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Famiglia</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Sezione</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">PROD</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">CARD</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">Score</th>
-                  <th className="text-right px-4 py-2 font-semibold text-gray-400">Confidence</th>
-                  <th className="text-left px-4 py-2 font-semibold text-gray-400">Motivazione principale</th>
-                </tr>
-              </thead>
-              <tbody>
-                {enrichedPicks.map((pick, idx) => {
-                  const firstReason = pick.reasons?.[0];
-                  const reasonText = typeof firstReason === 'string'
-                    ? firstReason
-                    : firstReason?.text ?? pick.reason ?? '—';
-                  return (
-                    <tr key={`${pick.fc}-${idx}`} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
-                      <td className="px-4 py-2 font-mono font-bold text-dimar-dark">{pick.fc}</td>
-                      <td className="px-4 py-2 text-gray-700 max-w-[140px] truncate">{pick.fn}</td>
-                      <td className="px-4 py-2">
-                        <SectionBadge sectionKey={pick.sectionKey} label={pick.sectionLabel} />
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded bg-dimar-red text-white">
-                          {pick.prodCount ?? 0}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded bg-rose-500 text-white">
-                          {pick.cardCount ?? 0}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-right font-mono tabular-nums font-bold text-dimar-dark">
-                        {Math.round(normScore(pick.score ?? 0) * 100)}
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <ConfidenceBadge value={pick.confidence ?? 0} />
-                      </td>
-                      <td className="px-4 py-2 text-gray-500 max-w-[200px] truncate">{reasonText}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Impact summary */}
-      {picks.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-            Impatto atteso (stima AI)
-          </p>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <p className="text-[10px] text-gray-400 mb-1">Revenue atteso</p>
-              <p className="text-lg font-extrabold text-dimar-dark tabular-nums">
-                €{totalRevK > 0 ? fmtEuro(totalRevK) : '—'}k
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-400 mb-1">Prob. volantino media</p>
-              <p className="text-lg font-extrabold text-emerald-600 tabular-nums">
-                {avgCardProb > 0 ? fmtPct(avgCardProb > 1 ? avgCardProb / 100 : avgCardProb) : '—'}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-400 mb-1">Engagement medio</p>
-              <p className="text-lg font-extrabold text-violet-600 tabular-nums">
-                {avgEngagement > 0 ? fmtPct(avgEngagement > 1 ? avgEngagement / 100 : avgEngagement) : '—'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {picks.length === 0 && (
-        <p className="text-sm text-gray-400 italic py-4 text-center">
-          Nessuna selezione AI trovata per questa promozione.
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ─── Footer ───────────────────────────────────────────────────────────────────
-
-function ReportFooter({ aiResult, onExportPDF }) {
-  const ts = new Date().toLocaleString('it-IT', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
   const model = aiResult?.model ?? 'claude-opus-4-8';
+  const aiPromo = aiResult?.promos?.[0];
+  const picks = aiPromo?.picks ?? [];
+  const insight = aiPromo?.insight;
+  const suggestions = plan?.richByPromo?.[promoCode] ?? [];
 
-  return (
-    <footer className="mt-8 pt-4 border-t border-gray-200 flex items-center justify-between flex-wrap gap-3 print:mt-4">
-      <p className="text-[11px] text-gray-400">
-        Generato da{' '}
-        <span className="font-semibold text-violet-600">Claude</span>
-        {' '}({model}) · {ts}
-      </p>
-      <button
-        onClick={onExportPDF}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-xs font-bold shadow-md hover:shadow-lg active:scale-95 transition-all print:hidden"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        Esporta PDF
-      </button>
-    </footer>
+  const totalCandidates = useMemo(() =>
+    sections.reduce((s, sec) => s + sec.reparti.reduce((t, r) => t + (r.candidates?.length || 0), 0), 0),
+    [sections]
   );
-}
 
-// ─── Root component ───────────────────────────────────────────────────────────
+  const totalBudgetProd = useMemo(() =>
+    sections.reduce((s, sec) => s + sec.reparti.reduce((t, r) => t + (r.budgetProd || 0), 0), 0),
+    [sections]
+  );
+  const totalBudgetCard = useMemo(() =>
+    sections.reduce((s, sec) => s + sec.reparti.reduce((t, r) => t + (r.budgetCard || 0), 0), 0),
+    [sections]
+  );
 
-export default function AIDetailReport({
-  promoCode,
-  plan,
-  payload,
-  weights,
-  aiResult,
-  onClose,
-}) {
+  const usedProd = picks.reduce((s, p) => s + (p.prodCount || 0), 0);
+  const usedCard = picks.reduce((s, p) => s + (p.cardCount || 0), 0);
+
+  const sortedWeights = useMemo(() =>
+    Object.entries(weights || {}).sort(([, a], [, b]) => b - a),
+    [weights]
+  );
+
+  // Build the user prompt text (same logic as server) for display
+  const userPromptPreview = useMemo(() => {
+    if (!promoPayload) return '';
+    const lines = [
+      `CANALE: ${promoPayload.canale ?? ''}`,
+      `PROMO ${promoPayload.promoCode} — Q${promoPayload.quadrimestre ?? '?'} — ${promoPayload.dataInizio ?? ''} → ${promoPayload.dataFine ?? ''}`,
+      `Tema: ${promoPayload.tema ?? ''} | Ruolo: ${promoPayload.ruolo ?? ''}`,
+    ];
+    if (weights) {
+      lines.push('', 'PRIORITÀ KPI (pesi dall\'utente):');
+      for (const [k, v] of sortedWeights) {
+        lines.push(`  ${WEIGHT_LABELS[k] || k}: ${v.toFixed(2)}`);
+      }
+    }
+    if (promoPayload.context) {
+      lines.push('', 'CONTESTO PROMO:');
+      if (promoPayload.context.prevYear) lines.push(`  Anno precedente: ricavi ${promoPayload.context.prevYear.totalRevenue}k, lift ${promoPayload.context.prevYear.avgLift}`);
+      if (promoPayload.context.competition) lines.push(`  Concorrenza: ${promoPayload.context.competition}`);
+      if (promoPayload.context.seasonal) lines.push(`  Stagione: ${promoPayload.context.seasonal}`);
+    }
+    lines.push('', `SEZIONI E CANDIDATI: ${sections.length} sezioni, ${totalCandidates} candidati totali`);
+    lines.push('', '[payload JSON dei candidati con KPI — vedi sezione "Dati di input"]');
+    return lines.join('\n');
+  }, [promoPayload, weights, sortedWeights, sections, totalCandidates]);
+
   function handleExportPDF() {
     window.print();
   }
 
   return (
-    <div className="min-h-screen bg-dimar-gray print:bg-white">
-      {/* Print styles */}
+    <div className="min-h-screen bg-gray-50 print:bg-white">
       <style>{`
         @media print {
           @page { margin: 16mm 12mm; size: A4; }
@@ -770,62 +111,266 @@ export default function AIDetailReport({
         }
       `}</style>
 
-      {/* Top navigation bar (hidden on print) */}
-      <div className="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm px-4 py-3 flex items-center gap-3 print:hidden">
-        <button
-          onClick={onClose}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-dimar-dark transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-100"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-          Torna al piano
+      {/* Top bar */}
+      <div className="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm px-4 py-3 flex items-center gap-3 no-print">
+        <button onClick={onClose} className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-dimar-dark px-2 py-1.5 rounded-lg hover:bg-gray-100">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+          Torna ai suggerimenti
         </button>
-        <span className="text-gray-200">|</span>
-        <span className="text-xs font-bold text-dimar-dark">
-          Report AI — {promoCode}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 text-violet-700 text-[10px] font-bold border border-violet-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
-            {aiResult?.model ?? 'claude-opus-4-8'}
-          </span>
-        </div>
+        <div className="flex-1" />
+        <button onClick={handleExportPDF} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg hover:bg-violet-50">
+          Esporta PDF
+        </button>
       </div>
 
-      {/* Page content */}
-      <div className="max-w-5xl mx-auto px-4 py-6 print:px-0 print:py-0 print:max-w-full">
+      <div className="max-w-4xl mx-auto px-6 py-6">
 
-        {/* 1 — Header */}
-        <HeaderSection
-          promoCode={promoCode}
-          plan={plan}
-          aiResult={aiResult}
-          payload={payload}
-        />
+        {/* Header */}
+        <header className="rounded-2xl overflow-hidden mb-6 shadow-lg print:shadow-none print:border print:border-gray-200">
+          <div className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 px-6 py-5">
+            <p className="text-violet-200 text-xs font-semibold uppercase tracking-widest mb-1">Report Analisi AI</p>
+            <h1 className="text-white text-2xl font-extrabold">{promoCode}</h1>
+            <p className="text-violet-100 text-sm mt-1">{promoPayload?.tema}</p>
+            <p className="text-violet-200 text-xs mt-1">{promoPayload?.dataInizio} → {promoPayload?.dataFine}</p>
+          </div>
+          <div className="bg-white px-6 py-3 flex items-center gap-6 flex-wrap text-[11px]">
+            <span><span className="text-gray-400">Modello:</span> <strong className="text-dimar-dark">{model}</strong></span>
+            <span><span className="text-gray-400">Generato:</span> <strong className="text-dimar-dark">{ts}</strong></span>
+            <span><span className="text-gray-400">Canale:</span> <strong className="text-dimar-dark">{promoPayload?.canale}</strong></span>
+            <span className="ml-auto px-2 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200">thinking: adaptive · streaming · top-10 candidati</span>
+          </div>
+        </header>
 
-        {/* 2 — Input Data */}
-        <ReportSection title="Dati di input" icon="📥" defaultOpen={true}>
-          <InputDataSection payload={payload} weights={weights} />
-        </ReportSection>
+        {/* 1. Parametri API */}
+        <Section title="1. Parametri chiamata API">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
+              {[
+                ['Modello', model],
+                ['max_tokens', '32.000'],
+                ['Thinking', 'adaptive'],
+                ['Output', 'structured (Zod schema)'],
+                ['Streaming', 'sì + heartbeat 15s'],
+                ['Prompt caching', 'sì (system prompt)'],
+                ['Candidati/reparto', '10'],
+                ['Campi arricchiti', '4 (elasticità, target, prezzo, trend)'],
+              ].map(([k, v]) => (
+                <div key={k} className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider">{k}</div>
+                  <div className="font-semibold text-dimar-dark mt-0.5">{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Section>
 
-        {/* 3 — AI Reasoning */}
-        <ReportSection title="Ragionamento AI" icon="🧠" defaultOpen={true}>
-          <AIReasoningSection promoCode={promoCode} aiResult={aiResult} plan={plan} />
-        </ReportSection>
+        {/* 2. System Prompt */}
+        <Section title="2. System prompt (inviato a Claude)" defaultOpen={false}>
+          <CodeBlock>{SYSTEM_PROMPT_TEXT}</CodeBlock>
+        </Section>
 
-        {/* 4 — Results */}
-        <ReportSection title="Risultati" icon="📊" defaultOpen={true}>
-          <ResultsSection
-            promoCode={promoCode}
-            aiResult={aiResult}
-            plan={plan}
-            payload={payload}
-          />
-        </ReportSection>
+        {/* 3. User Prompt */}
+        <Section title="3. User prompt (dati della promo)" defaultOpen={false}>
+          <CodeBlock>{userPromptPreview}</CodeBlock>
+        </Section>
 
-        {/* 5 — Footer */}
-        <ReportFooter aiResult={aiResult} onExportPDF={handleExportPDF} />
+        {/* 4. Pesi KPI */}
+        <Section title="4. Pesi KPI configurati dall'utente">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <div className="space-y-2">
+              {sortedWeights.map(([key, val]) => (
+                <div key={key} className="flex items-center gap-3 text-[11px]">
+                  <span className="w-32 text-gray-600 font-medium">{WEIGHT_LABELS[key] || key}</span>
+                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-violet-500 rounded-full" style={{ width: `${Math.min(100, val * 200)}%` }} />
+                  </div>
+                  <span className="w-10 text-right font-mono tabular-nums text-gray-700 font-bold">{val.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Section>
+
+        {/* 5. Dati di input */}
+        <Section title="5. Dati di input inviati a Claude">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-4">
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="bg-violet-50 rounded-lg p-3"><div className="text-xl font-bold text-violet-700">{sections.length}</div><div className="text-[10px] text-gray-500 uppercase">Sezioni</div></div>
+              <div className="bg-violet-50 rounded-lg p-3"><div className="text-xl font-bold text-violet-700">{totalCandidates}</div><div className="text-[10px] text-gray-500 uppercase">Candidati</div></div>
+              <div className="bg-violet-50 rounded-lg p-3"><div className="text-xl font-bold text-violet-700">{totalBudgetProd}</div><div className="text-[10px] text-gray-500 uppercase">Budget PROD</div></div>
+              <div className="bg-violet-50 rounded-lg p-3"><div className="text-xl font-bold text-violet-700">{totalBudgetCard}</div><div className="text-[10px] text-gray-500 uppercase">Budget CARD</div></div>
+            </div>
+
+            {/* Budget per section */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="text-left px-3 py-2 font-bold text-gray-500">Sezione</th>
+                    <th className="text-left px-3 py-2 font-bold text-gray-500">Reparto</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">PROD</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">CARD</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">Candidati</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">Locked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sections.flatMap(sec => sec.reparti.map(r => (
+                    <tr key={`${sec.key}-${r.repartoCode}`} className="border-b border-gray-50">
+                      <td className="px-3 py-1.5">{sec.short || sec.key}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{r.repartoName}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{r.budgetProd}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{r.budgetCard}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{r.candidates?.length || 0}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{r.locked?.length || 0}</td>
+                    </tr>
+                  )))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Context */}
+            {promoPayload?.context && (
+              <div className="space-y-1 text-[11px]">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Contesto inviato</div>
+                {promoPayload.context.seasonal && <p><span className="text-gray-400">Stagione:</span> {promoPayload.context.seasonal}</p>}
+                {promoPayload.context.competition && <p><span className="text-gray-400">Concorrenza:</span> {promoPayload.context.competition}</p>}
+                {promoPayload.context.prevYear && <p><span className="text-gray-400">Anno precedente:</span> ricavi {promoPayload.context.prevYear.totalRevenue}k, lift {promoPayload.context.prevYear.avgLift}, card {promoPayload.context.prevYear.cardActivations}, reach {promoPayload.context.prevYear.customerReach}</p>}
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* 6. Ragionamento AI */}
+        <Section title="6. Ragionamento e output di Claude">
+          <div className="space-y-4">
+            {/* Insight */}
+            {insight && (
+              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+                <div className="text-[10px] font-bold text-violet-600 uppercase tracking-wider mb-1">Insight strategico di Claude</div>
+                <p className="text-sm text-gray-800 italic">"{insight}"</p>
+              </div>
+            )}
+
+            {/* Copertura budget */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Copertura budget</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="text-gray-600">PROD</span>
+                    <span className="font-bold tabular-nums">{usedProd} / {totalBudgetProd} <span className={usedProd >= totalBudgetProd ? 'text-emerald-600' : 'text-red-600'}>({totalBudgetProd > 0 ? Math.round(usedProd / totalBudgetProd * 100) : 0}%)</span></span>
+                  </div>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${usedProd >= totalBudgetProd ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${totalBudgetProd > 0 ? Math.min(100, usedProd / totalBudgetProd * 100) : 0}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="text-gray-600">CARD</span>
+                    <span className="font-bold tabular-nums">{usedCard} / {totalBudgetCard} <span className={usedCard >= totalBudgetCard ? 'text-emerald-600' : 'text-red-600'}>({totalBudgetCard > 0 ? Math.round(usedCard / totalBudgetCard * 100) : 0}%)</span></span>
+                  </div>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${usedCard >= totalBudgetCard ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${totalBudgetCard > 0 ? Math.min(100, usedCard / totalBudgetCard * 100) : 0}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Picks table */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{picks.length} famiglie selezionate da Claude</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="text-left px-3 py-2 font-bold text-gray-400">FC</th>
+                      <th className="text-left px-3 py-2 font-bold text-gray-400">Sezione</th>
+                      <th className="text-right px-3 py-2 font-bold text-gray-400">PROD</th>
+                      <th className="text-right px-3 py-2 font-bold text-gray-400">CARD</th>
+                      <th className="text-right px-3 py-2 font-bold text-gray-400">Score</th>
+                      <th className="text-right px-3 py-2 font-bold text-gray-400">Conf.</th>
+                      <th className="text-left px-3 py-2 font-bold text-gray-400">Motivazione principale</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {picks.map((p, i) => (
+                      <tr key={i} className="border-b border-gray-50 hover:bg-violet-50/30">
+                        <td className="px-3 py-1.5 font-mono text-[10px]">{p.fc}</td>
+                        <td className="px-3 py-1.5">{p.sectionKey}</td>
+                        <td className="px-3 py-1.5 text-right font-mono font-bold">{p.prodCount}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{p.cardCount}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{p.score}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{p.confidence}%</td>
+                        <td className="px-3 py-1.5 text-gray-600 truncate max-w-[300px]">{(p.reasons || [])[0] || p.reason || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Detailed reasons */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">Motivazioni dettagliate per pick</div>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {picks.map((p, i) => (
+                  <div key={i} className="border-b border-gray-50 pb-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-[10px] font-bold text-violet-600">{p.fc}</span>
+                      <span className="text-[10px] text-gray-400">{p.sectionKey}</span>
+                      <span className="text-[10px] text-gray-400">· {p.prodCount}P {p.cardCount}C</span>
+                    </div>
+                    {(p.reasons || []).map((r, j) => (
+                      <p key={j} className="text-[11px] text-gray-700 pl-3 before:content-['→'] before:mr-1.5 before:text-emerald-500">{r}</p>
+                    ))}
+                    {p.warning && <p className="text-[11px] text-amber-600 pl-3 before:content-['⚠'] before:mr-1.5">{p.warning}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* 7. Sintesi */}
+        <Section title="7. Sintesi risultati">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-4">
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="bg-emerald-50 rounded-lg p-3"><div className="text-xl font-bold text-emerald-700">{picks.length}</div><div className="text-[10px] text-gray-500 uppercase">Famiglie scelte</div></div>
+              <div className="bg-violet-50 rounded-lg p-3"><div className="text-xl font-bold text-violet-700">{usedProd}</div><div className="text-[10px] text-gray-500 uppercase">Slot PROD</div></div>
+              <div className="bg-rose-50 rounded-lg p-3"><div className="text-xl font-bold text-rose-700">{usedCard}</div><div className="text-[10px] text-gray-500 uppercase">Slot CARD</div></div>
+              <div className="bg-blue-50 rounded-lg p-3"><div className="text-xl font-bold text-blue-700">{totalBudgetProd > 0 ? Math.round(usedProd / totalBudgetProd * 100) : 0}%</div><div className="text-[10px] text-gray-500 uppercase">Copertura</div></div>
+            </div>
+
+            {/* Impact */}
+            {suggestions.length > 0 && (
+              <div>
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Impatto aggregato (stime Claude)</div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-lg font-bold text-violet-700">€ {Math.round(suggestions.reduce((s, x) => s + (x.impact?.expectedRevenue || 0), 0) / 1000)}k</div>
+                    <div className="text-[10px] text-gray-500">Ricavo atteso</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-lg font-bold text-rose-600">{Math.round(suggestions.reduce((s, x) => s + (x.impact?.cardProb || 0), 0) / suggestions.length * 100)}%</div>
+                    <div className="text-[10px] text-gray-500">Prob. card media</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-lg font-bold text-indigo-600">{Math.round(suggestions.reduce((s, x) => s + (x.impact?.engagement || 0), 0) / suggestions.length * 100)}%</div>
+                    <div className="text-[10px] text-gray-500">Engagement medio</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* Footer */}
+        <div className="text-center text-[10px] text-gray-400 mt-8 pb-6 print:mt-4">
+          Generato da Claude ({model}) · {ts}
+        </div>
       </div>
     </div>
   );

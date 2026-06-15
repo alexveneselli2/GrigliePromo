@@ -173,7 +173,7 @@ async function planForPromo(promo, weights) {
   // output_config and parse/validate the final message text ourselves.
   const stream = client.beta.messages.stream({
     model: MODEL,
-    max_tokens: 32000,
+    max_tokens: 64000,
     // Extended (adaptive) thinking: lets the model reason through budget
     // trade-offs and rotation before committing. Safe with streaming + 32k.
     thinking: { type: 'adaptive' },

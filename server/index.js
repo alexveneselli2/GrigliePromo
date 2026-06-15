@@ -113,11 +113,15 @@ async function planForPromo(promo, weights) {
   // warning text), so we give it plenty of headroom. Above ~16k max_tokens the
   // SDK requires streaming to avoid HTTP timeouts — so we stream and read the
   // final message, then validate it against the Zod schema.
+  // betaZodOutputFormat() returns { type: 'json_schema', schema }, i.e. the
+  // canonical `output_config.format` object. The top-level `output_format`
+  // param is deprecated (and rejected on streaming calls), so we pass it via
+  // output_config and parse/validate the final message text ourselves.
   const stream = client.beta.messages.stream({
     model: MODEL,
     max_tokens: 32000,
     system: SYSTEM_PROMPT,
-    output_format: betaZodOutputFormat(PromoResultSchema),
+    output_config: { format: betaZodOutputFormat(PromoResultSchema) },
     messages: [{ role: 'user', content: buildUserPrompt(promo, weights) }],
   });
 
@@ -127,8 +131,7 @@ async function planForPromo(promo, weights) {
     throw new Error(`Output troncato per promo ${promo.promoCode} — max_tokens raggiunto`);
   }
 
-  // With output_format set, the SDK exposes the validated result on the final
-  // message; fall back to parsing the text content if needed.
+  // Prefer the SDK's parsed result if present, else parse the text content.
   let parsed = response.parsed_output;
   if (!parsed) {
     const text = (response.content || [])

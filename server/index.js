@@ -120,7 +120,12 @@ async function planForPromo(promo, weights) {
   const stream = client.beta.messages.stream({
     model: MODEL,
     max_tokens: 32000,
-    system: SYSTEM_PROMPT,
+    // Extended (adaptive) thinking: lets the model reason through budget
+    // trade-offs and rotation before committing. Safe with streaming + 32k.
+    thinking: { type: 'adaptive' },
+    // The system prompt is identical on every call, so we cache it: subsequent
+    // promo requests reuse it instead of re-billing/re-processing the tokens.
+    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     output_config: { format: betaZodOutputFormat(PromoResultSchema) },
     messages: [{ role: 'user', content: buildUserPrompt(promo, weights) }],
   });

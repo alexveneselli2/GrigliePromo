@@ -249,7 +249,9 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
       for (let i = 0; i < channelPromos.length; i++) {
         const promo = channelPromos[i];
         setAiProgress({ done: i, total, current: promo.codice });
-        const payload = buildAIChannelPayload(channel, weights, 8, promo.codice);
+        // top-15 candidates per section/reparto: gives Claude real room to
+        // explore rather than just refining a narrow heuristic preselection.
+        const payload = buildAIChannelPayload(channel, weights, 15, promo.codice);
         if (payload.promos.length === 0) continue; // no sections/candidates for this promo
         const aiResult = await requestAIPlan(payload);
         model = aiResult?.model || model;

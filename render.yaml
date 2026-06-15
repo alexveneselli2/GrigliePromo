@@ -1,22 +1,28 @@
-# Render Blueprint for the AI proxy backend.
-# Deploy: Render Dashboard → New → Blueprint → pick this repo.
-# Then set the ANTHROPIC_API_KEY secret in the service's Environment tab.
+# Render Blueprint — single service that hosts BOTH the app and the AI proxy.
+#
+# Deploy: Render Dashboard → New → Blueprint → pick this repo → Apply.
+# Then open the service → Environment → set the ANTHROPIC_API_KEY secret.
+# That's it: same origin for app + API, no CORS, no GitHub variable needed.
 services:
   - type: web
-    name: grigliepromo-ai-proxy
+    name: grigliepromo
     runtime: node
-    rootDir: server
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    # Install deps (incl. Vite devDeps), build the frontend with same-origin AI,
+    # then install the server's own deps.
+    buildCommand: npm install --include=dev && npm run build && npm install --prefix server
+    startCommand: node server/index.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Secret — set this value in the Render dashboard, never in the repo.
+      # Secret — paste your Anthropic API key here in the Render dashboard.
+      # Never commit it. Without it the app still loads (heuristic engine only).
       - key: ANTHROPIC_API_KEY
         sync: false
-      # Browser origins allowed to call the proxy (your GitHub Pages site).
-      - key: ALLOWED_ORIGINS
-        value: https://alexveneselli2.github.io
       - key: AI_MODEL
         value: claude-opus-4-8
+      # Build-time flag: makes the frontend call the AI on the same origin.
+      - key: VITE_AI_SAME_ORIGIN
+        value: "1"
+      - key: NODE_VERSION
+        value: "20"

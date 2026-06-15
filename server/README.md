@@ -70,9 +70,25 @@ engine, so the GitHub Pages demo keeps working.
 The frontend clamps `prodCount`/`cardCount` to the real section budget on apply,
 so suggestions can never exceed budget even if the model overshoots.
 
-## Deploy
+## Deploy on Render (single service — recommended)
 
-Any Node host works (Render, Fly, Railway, a VM, a container). Set
-`ANTHROPIC_API_KEY` and `ALLOWED_ORIGINS` (include your Pages origin) in the
-host's env. Then set `VITE_AI_PROXY_URL` to the deployed URL when building the
-frontend.
+The repo ships a `render.yaml` blueprint that builds the frontend **and** runs
+this server, hosting both on the same origin (no CORS, no extra config).
+
+1. Render Dashboard → **New → Blueprint** → select this repo → **Apply**.
+   (Render reads `render.yaml`: build = `npm install --include=dev && npm run
+   build && npm install --prefix server`, start = `node server/index.js`.)
+2. Open the created service → **Environment** → add the secret
+   **`ANTHROPIC_API_KEY`** = your key → save (it redeploys).
+3. Open the service URL. The whole app loads; **AI Plan → AI (Claude)** works
+   on the same domain.
+
+Without the key the app still loads and `/api/ai/plan` returns `503` (the
+heuristic engine keeps working). On Render's free plan the service sleeps when
+idle, so the first request after a pause takes ~30–50s to wake.
+
+## Deploy split (separate proxy + static frontend elsewhere)
+
+Run this server anywhere, set `ANTHROPIC_API_KEY` and `ALLOWED_ORIGINS`
+(include the frontend origin), then build the frontend with
+`VITE_AI_PROXY_URL=https://your-proxy` so it calls the proxy cross-origin.

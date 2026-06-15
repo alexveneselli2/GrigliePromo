@@ -8,40 +8,52 @@
 // server calls the Anthropic Messages API with structured outputs and returns
 // JSON the UI can render.
 
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8787;
 const MODEL = process.env.AI_MODEL || 'claude-opus-4-8';
+// Extra cross-origin browsers allowed to call the proxy (besides same-origin,
+// which is always allowed). Same-origin works automatically — no config needed.
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('\n[FATAL] ANTHROPIC_API_KEY is not set. Copy server/.env.example to server/.env and add your key.\n');
-  process.exit(1);
+const HAS_KEY = !!process.env.ANTHROPIC_API_KEY;
+if (!HAS_KEY) {
+  console.warn('\n[WARN] ANTHROPIC_API_KEY is not set — the static app will still be served, but /api/ai/plan will return 503 until you add the key.\n');
 }
 
-// Reads ANTHROPIC_API_KEY from the environment.
-const client = new Anthropic();
+// Reads ANTHROPIC_API_KEY from the environment (only constructed when present).
+const client = HAS_KEY ? new Anthropic() : null;
 
 const app = express();
+app.set('trust proxy', true); // so req.protocol reflects x-forwarded-proto on Render
 app.use(express.json({ limit: '4mb' }));
-app.use(
-  cors({
+
+// CORS that always allows same-origin (the request's own host) plus any
+// configured cross-origin. This makes the single-service Render deploy work
+// with zero CORS config while still supporting a split Pages+proxy setup.
+app.use((req, res, next) => {
+  const selfOrigin = `${req.protocol}://${req.headers.host}`;
+  const allow = new Set([...ALLOWED_ORIGINS, selfOrigin]);
+  return cors({
     origin(origin, cb) {
-      // Allow same-origin / curl (no Origin header) and any whitelisted origin.
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      if (!origin || allow.has(origin)) return cb(null, true);
       return cb(new Error(`Origin ${origin} not allowed by CORS`));
     },
-  })
-);
+  })(req, res, next);
+});
 
-app.get('/health', (_req, res) => res.json({ ok: true, model: MODEL }));
+app.get('/health', (_req, res) => res.json({ ok: true, model: MODEL, ai: HAS_KEY }));
 
 // ---- Structured-output schema returned by Claude (per promo) ----
 const PickSchema = z.object({
@@ -106,6 +118,9 @@ async function planForPromo(promo, weights) {
 }
 
 app.post('/api/ai/plan', async (req, res) => {
+  if (!HAS_KEY) {
+    return res.status(503).json({ error: 'AI non disponibile: ANTHROPIC_API_KEY non configurata sul server.' });
+  }
   const { promos, weights } = req.body || {};
   if (!Array.isArray(promos) || promos.length === 0) {
     return res.status(400).json({ error: 'Body must include a non-empty "promos" array.' });
@@ -125,7 +140,22 @@ app.post('/api/ai/plan', async (req, res) => {
   }
 });
 
+// ---- Serve the built frontend (single-service deploy) ----
+// When the Vite build output exists (../dist), serve it as static files with
+// SPA fallback. This lets one Render service host both the app and the API on
+// the same origin (no CORS, no VITE_AI_PROXY_URL needed).
+const distDir = path.resolve(__dirname, '..', 'dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  console.log(`Serving frontend from ${distDir}`);
+} else {
+  console.log('No ../dist found — running in API-only mode (run "npm run build" at repo root to serve the app too).');
+}
+
 app.listen(PORT, () => {
-  console.log(`AI proxy listening on http://localhost:${PORT} (model: ${MODEL})`);
-  console.log(`Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`Server listening on port ${PORT} (model: ${MODEL}, ai: ${HAS_KEY})`);
 });

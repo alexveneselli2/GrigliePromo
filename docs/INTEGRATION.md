@@ -343,6 +343,45 @@ Le modifiche sono **contenute** perché i dati sono già isolati in `src/data/`.
    può restare su Pages (con `VITE_API_BASE` che punta al backend) oppure essere
    servito come static dal backend stesso (elimina problemi CORS).
 
+---
+
+## 9. Suggerimenti AI reali (Anthropic / Claude)
+
+Il pannello **AI Plan** può girare con due motori:
+
+- **Euristico locale** — il modello multi-KPI deterministico già descritto, gira
+  interamente nel browser (default su GitHub Pages, nessuna dipendenza).
+- **AI (Claude)** — i suggerimenti sono prodotti da `claude-opus-4-8` via API
+  Anthropic.
+
+### Perché serve un proxy
+La API key **non può** stare nel frontend (bundle pubblico su Pages). Il
+backend in `server/` (Express + `@anthropic-ai/sdk`) custodisce la chiave in
+`ANTHROPIC_API_KEY` (env) ed espone `POST /api/ai/plan`. Il browser chiama il
+proxy; se `VITE_AI_PROXY_URL` non è impostato, l'app usa automaticamente il
+motore euristico locale.
+
+### Come gira
+1. Il frontend costruisce un payload **compatto** per canale: per ogni
+   (promo × sezione × reparto con budget) le top-8 famiglie candidate con i KPI.
+2. Il proxy fa una chiamata Claude **per promo** con *structured outputs*
+   (Zod schema) e `thinking: adaptive`, model `claude-opus-4-8`.
+3. Claude restituisce, per ogni famiglia scelta: `prodCount`, `cardCount`,
+   `score`, `confidence`, `reason`, `warning` + un `insight` di strategia.
+4. Il frontend **clampa** prodCount/cardCount al budget reale di sezione e
+   reparto (l'AI non può mai sforare il budget) e renderizza le stesse card
+   ricche del motore euristico.
+
+### Setup
+Vedi `server/README.md`. In sintesi: `cd server && cp .env.example .env`
+(inserisci la chiave) → `npm install && npm start`; nel frontend
+`echo "VITE_AI_PROXY_URL=http://localhost:8787" > .env.local`.
+
+> ⚠️ La API key va messa **solo** in `server/.env` (git-ignored). Mai nel
+> codice, mai nel repo, mai nel bundle frontend.
+
+---
+
 ### Domande aperte da chiarire con i referenti DWH
 - Nomi reali di catalog/schema/tabelle su Mosaic (per finalizzare le query sez. 4).
 - Politica di storicizzazione su Netezza: **append-only** (consigliato) vs

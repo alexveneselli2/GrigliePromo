@@ -568,6 +568,233 @@ export function generatePlanInsights(richByPromo, channelPromos) {
 
 // ---------- Helpers exposed to UI ----------
 
+// ---------------------------------------------------------------------------
+// Real-AI mode (Anthropic via the proxy backend)
+// ---------------------------------------------------------------------------
+
+// Build families enriched with this promo's metrics.
+function buildFamiliesForPromo(promoCode) {
+  const metrics = METRICS[promoCode] || {};
+  return ANAGRAFICA.map(a => {
+    const x = metrics[a.fc] || {};
+    return {
+      ...a,
+      v: x.v || 0, margine: x.m || 0, ps: x.ps || 0,
+      m1: x.m1 || 0, m2: x.m2 || 0, m3: x.m3 || 0, m4: x.m4 || 0,
+      ultimaPromo: x.ultima, penultimaPromo: x.penultima,
+      nVol: x.nVol || 0, nPromo: x.nPromo || 0,
+    };
+  });
+}
+
+// Build the compact candidate payload sent to Claude (via the proxy).
+// Prefilters to the top-K families per (section × reparto) so the prompt stays bounded.
+export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, topK = 8) {
+  const channelPromos = PROMOZIONI
+    .filter(p => p.canale === channelCode)
+    .sort((a, b) => (a.dataInizio || '').localeCompare(b.dataInizio || ''));
+
+  const promos = channelPromos.map(promo => {
+    const promoCode = promo.codice;
+    const sections = getSectionsForPromo(promo);
+    const families = buildFamiliesForPromo(promoCode);
+    const salesNorm = normalizeWithinReparto(families, 'v');
+    const marginNorm = normalizeWithinReparto(families, 'margine');
+    const psNorm = normalizeWithinReparto(families, 'ps');
+
+    const byReparto = {};
+    for (const f of families) {
+      if (!REPARTO_TO_SPAZI[f.rc] || REPARTO_TO_SPAZI[f.rc].length === 0) continue;
+      (byReparto[f.rc] = byReparto[f.rc] || []).push(f);
+    }
+
+    const sectionPayloads = sections.map(sec => {
+      const reparti = [];
+      for (const [repartoCode, repFamilies] of Object.entries(byReparto)) {
+        const budget = getBudgetForRepartoSezione(promoCode, sec.key, repartoCode);
+        if (!budget.prod) continue;
+        const ranked = repFamilies
+          .filter(f => f.v > 0)
+          .map(f => ({ f, s: computeBaseScore(f, promo, sec, weights, salesNorm, marginNorm, psNorm).score }))
+          .sort((a, b) => b.s - a.s)
+          .slice(0, topK);
+        if (ranked.length === 0) continue;
+        reparti.push({
+          repartoCode,
+          repartoName: repFamilies[0].rn,
+          budgetProd: budget.prod,
+          budgetCard: budget.card,
+          candidates: ranked.map(({ f }) => ({
+            fc: f.fc,
+            fn: f.fn,
+            settore: f.sn,
+            vendite: Math.round(f.v),
+            marginePct: +(f.margine * 100).toFixed(1),
+            scontriniPct: +(f.ps * 100).toFixed(2),
+            m: [Math.round(f.m1), Math.round(f.m2), Math.round(f.m3), Math.round(f.m4)],
+            ultimaPromo: f.ultimaPromo || null,
+            nVol: f.nVol,
+          })),
+        });
+      }
+      return { key: sec.key, label: sec.label, short: sec.short, reparti };
+    }).filter(s => s.reparti.length > 0);
+
+    return {
+      promoCode,
+      canale: promo.canale,
+      tema: promo.tema,
+      sottotema: promo.sottotema !== 'NA' ? promo.sottotema : undefined,
+      quadrimestre: promo.quadrimestre,
+      dataInizio: promo.dataInizio,
+      dataFine: promo.dataFine,
+      ruolo: promo.ruoloTema,
+      sections: sectionPayloads,
+    };
+  }).filter(p => p.sections.length > 0);
+
+  return { weights, promos };
+}
+
+// Assemble the AI response into the same rich-plan shape the UI renders.
+// Clamps prodCount/cardCount to the real section budgets so the AI can never
+// push a section over budget.
+export function assembleAIPlan(channelCode, aiResult, weights = DEFAULT_WEIGHTS) {
+  const channelPromos = PROMOZIONI
+    .filter(p => p.canale === channelCode)
+    .sort((a, b) => (a.dataInizio || '').localeCompare(b.dataInizio || ''));
+
+  const byPromoAI = {};
+  for (const p of (aiResult?.promos || [])) byPromoAI[p.promoCode] = p;
+
+  const richByPromo = {};
+  const sectionOrder = ['tema', 'sotto', 's1', 's2', 's3', 's4'];
+
+  for (const promo of channelPromos) {
+    const promoCode = promo.codice;
+    const sections = getSectionsForPromo(promo);
+    const sectionByKey = Object.fromEntries(sections.map(s => [s.key, s]));
+    const families = buildFamiliesForPromo(promoCode);
+    const familyByFc = Object.fromEntries(families.map(f => [f.fc, f]));
+    const salesNorm = normalizeWithinReparto(families, 'v');
+    const marginNorm = normalizeWithinReparto(families, 'margine');
+    const psNorm = normalizeWithinReparto(families, 'ps');
+
+    // Remaining budget per section (defensive clamp) and per (section × reparto).
+    const remaining = {};
+    for (const sec of sections) {
+      const t = getPromoTotalBudget(promoCode, sec.key);
+      remaining[sec.key] = { prod: t.prod, card: t.card };
+    }
+    const repRemaining = {}; // `${sectionKey}::${repartoCode}` -> {prod, card}
+
+    const aiPromo = byPromoAI[promoCode];
+    const suggestions = [];
+
+    for (const pick of (aiPromo?.picks || [])) {
+      const sec = sectionByKey[pick.sectionKey];
+      const family = familyByFc[pick.fc];
+      if (!sec || !family) continue;
+      const rem = remaining[pick.sectionKey];
+      if (!rem || rem.prod <= 0) continue;
+
+      // Per-reparto budget for this section
+      const rkey = `${pick.sectionKey}::${family.rc}`;
+      if (!repRemaining[rkey]) {
+        const rb = getBudgetForRepartoSezione(promoCode, pick.sectionKey, family.rc);
+        repRemaining[rkey] = { prod: rb.prod, card: rb.card };
+      }
+      const repRem = repRemaining[rkey];
+      if (repRem.prod <= 0) continue;
+
+      let prodCount = Math.max(0, Math.floor(pick.prodCount || 0));
+      prodCount = Math.min(prodCount, rem.prod, repRem.prod);
+      if (prodCount < 1) prodCount = 1; // an accepted pick is at least one slot
+      prodCount = Math.min(prodCount, rem.prod, repRem.prod);
+      let cardCount = Math.max(0, Math.floor(pick.cardCount || 0));
+      cardCount = Math.min(cardCount, prodCount, rem.card, repRem.card);
+
+      rem.prod -= prodCount;
+      rem.card -= cardCount;
+      repRem.prod -= prodCount;
+      repRem.card -= cardCount;
+
+      const base = computeBaseScore(family, promo, sec, weights, salesNorm, marginNorm, psNorm);
+      const impact = predictImpact(family, base.components, sec);
+
+      const reasons = [{ icon: 'theme', text: pick.reason || 'Selezionata dall’AI', strength: 'high' }];
+      if (prodCount >= 3) {
+        reasons.unshift({ icon: 'role', text: `L'AI concentra ${prodCount} spazi su questa famiglia`, strength: 'high' });
+      } else if (prodCount === 2) {
+        reasons.unshift({ icon: 'role', text: `Doppio spazio consigliato dall'AI`, strength: 'medium' });
+      }
+      const warnings = pick.warning ? [{ icon: 'warning', text: pick.warning, severity: 'medium' }] : [];
+
+      suggestions.push({
+        promoCode,
+        fc: family.fc,
+        family,
+        sectionKey: sec.key,
+        sectionLabel: sec.label,
+        sectionShort: sec.short,
+        sectionColor: sec.color,
+        repartoCode: family.rc,
+        repartoName: family.rn,
+        prodCount,
+        cardCount,
+        score: Math.max(0, Math.min(1, (pick.score ?? 60) / 100)),
+        confidence: Math.max(0.3, Math.min(0.99, (pick.confidence ?? 70) / 100)),
+        components: base.components,
+        reasons,
+        warnings,
+        impact: { ...impact, expectedRevenue: impact.expectedRevenue * prodCount },
+        alternatives: [],
+        satPenalty: 0,
+        usageBefore: 0,
+        ai: true,
+      });
+    }
+
+    suggestions.sort((a, b) => {
+      if (a.sectionKey !== b.sectionKey) {
+        return sectionOrder.indexOf(a.sectionKey) - sectionOrder.indexOf(b.sectionKey);
+      }
+      return b.score - a.score;
+    });
+
+    richByPromo[promoCode] = suggestions;
+  }
+
+  // Insights: the model's per-promo commentary + a couple of computed aggregates.
+  const insights = [];
+  const all = Object.values(richByPromo).flat();
+  const distinct = new Set(all.map(s => s.fc)).size;
+  const totalProd = all.reduce((s, x) => s + (x.prodCount || 0), 0);
+
+  insights.push({
+    type: 'positive',
+    icon: 'confidence',
+    title: 'Motore AI',
+    value: aiResult?.model ? 'Claude' : 'AI',
+    text: `Piano generato da ${aiResult?.model || 'Claude'}: ${all.length} proposte, ${totalProd} slot su ${distinct} famiglie distinte.`,
+  });
+
+  for (const promo of channelPromos) {
+    const ai = byPromoAI[promo.codice];
+    if (ai?.insight) {
+      insights.push({
+        type: 'neutral',
+        icon: 'season',
+        title: promo.codice,
+        value: `Q${promo.quadrimestre}`,
+        text: ai.insight,
+      });
+    }
+  }
+
+  return { richByPromo, channelPromos, insights };
+}
+
 export function buildSelectionsFromAccepted(accepted, richByPromo) {
   // accepted: { [promoCode]: { [`${fc}::${sectionKey}`]: true } }
   const selectionsByPromo = {};

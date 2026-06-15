@@ -3,8 +3,11 @@ import {
   generateRichPlan,
   generatePlanInsights,
   buildSelectionsFromAccepted,
+  buildAIChannelPayload,
+  assembleAIPlan,
   DEFAULT_WEIGHTS,
 } from '../../ai/engine';
+import { isAIConfigured, requestAIPlan, aiProxyUrl } from '../../ai/anthropicClient';
 import PROMOZIONI from '../../data/promozioni';
 import AISuggestionCard from './AISuggestionCard';
 import AIWeightsTab from './AIWeightsTab';
@@ -173,6 +176,10 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
   const [activeSection, setActiveSection] = useState('all'); // section key filter
   const [groupBy, setGroupBy] = useState('section'); // 'section' | 'reparto' | 'none'
   const [tab, setTab] = useState('plan');
+  // engine: 'heuristic' (local, offline) | 'ai' (real Claude via proxy)
+  const aiAvailable = isAIConfigured();
+  const [engine, setEngine] = useState(aiAvailable ? 'ai' : 'heuristic');
+  const [aiError, setAiError] = useState(null);
   // accepted[promoCode][`${fc}::${sectionKey}`] = true | false
   const [accepted, setAccepted] = useState({});
 
@@ -182,26 +189,55 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     [channel]
   );
 
-  const runPlan = () => {
+  const finishPlan = (result, insights) => {
+    const preAccepted = {};
+    for (const promoCode of Object.keys(result.richByPromo)) {
+      preAccepted[promoCode] = {};
+      for (const s of result.richByPromo[promoCode]) {
+        preAccepted[promoCode][`${s.fc}::${s.sectionKey}`] = true;
+      }
+    }
+    setAccepted(preAccepted);
+    setPlan({ ...result, insights });
+    setActivePromo(result.channelPromos[0]?.codice || null);
+    setThinking(false);
+  };
+
+  const runHeuristicPlan = () => {
     setThinking(true);
     setPlan(null);
     setAccepted({});
+    setAiError(null);
     setTimeout(() => {
       const result = generateRichPlan(channel, weights);
       const insights = generatePlanInsights(result.richByPromo, result.channelPromos);
-      // Pre-accept all suggestions by default
-      const preAccepted = {};
-      for (const promoCode of Object.keys(result.richByPromo)) {
-        preAccepted[promoCode] = {};
-        for (const s of result.richByPromo[promoCode]) {
-          preAccepted[promoCode][`${s.fc}::${s.sectionKey}`] = true;
-        }
-      }
-      setAccepted(preAccepted);
-      setPlan({ ...result, insights });
-      setActivePromo(result.channelPromos[0]?.codice || null);
+      finishPlan(result, insights);
+    }, 1200);
+  };
+
+  const runAIPlan = async () => {
+    setThinking(true);
+    setPlan(null);
+    setAccepted({});
+    setAiError(null);
+    try {
+      const payload = buildAIChannelPayload(channel, weights);
+      const aiResult = await requestAIPlan(payload);
+      const result = assembleAIPlan(channel, aiResult, weights);
+      finishPlan(result, result.insights);
+    } catch (err) {
       setThinking(false);
-    }, 2500);
+      setAiError(err?.message || 'Errore durante la chiamata AI');
+    }
+  };
+
+  const runPlan = () => {
+    if (engine === 'ai') {
+      if (!aiAvailable) { setAiError('AI proxy non configurato.'); return; }
+      runAIPlan();
+    } else {
+      runHeuristicPlan();
+    }
   };
 
   const toggleAccept = (promoCode, fc, sectionKey, value) => {
@@ -384,20 +420,72 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
             <>
               {!plan && !thinking && (
                 <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center max-w-md">
+                  <div className="text-center max-w-lg">
                     <div className="text-5xl mb-4">✨</div>
                     <h3 className="text-lg font-bold text-dimar-dark mb-2">
                       Pronto a generare il piano
                     </h3>
-                    <p className="text-sm text-gray-500 mb-6">
-                      L'AI analizzerà <strong>{channelPromos.length} promo</strong> del canale {channel}, attraversando 307 famiglie merceologiche, 6 sezioni promozionali e 8 KPI per generare suggerimenti con confidenza, reasoning e impatto stimato.
+                    <p className="text-sm text-gray-500 mb-5">
+                      {engine === 'ai'
+                        ? <>Claude analizzerà le <strong>{channelPromos.length} promo</strong> del canale {channel} e proporrà famiglie e quantità di spazi per ogni sezione, rispettando i budget.</>
+                        : <>Il motore euristico locale analizzerà le <strong>{channelPromos.length} promo</strong> del canale {channel} con 8 KPI per generare suggerimenti con confidenza, reasoning e impatto stimato.</>}
                     </p>
-                    <button
-                      onClick={runPlan}
-                      className="px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-bold rounded-xl shadow-lg hover:shadow-xl transition-all"
-                    >
-                      🚀 Avvia analisi
-                    </button>
+
+                    {/* Engine selector */}
+                    <div className="inline-flex items-center bg-gray-100 rounded-xl p-1 mb-5">
+                      <button
+                        onClick={() => setEngine('heuristic')}
+                        className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${engine === 'heuristic' ? 'bg-white shadow-sm text-dimar-dark' : 'text-gray-500 hover:text-dimar-dark'}`}
+                      >
+                        Euristico locale
+                      </button>
+                      <button
+                        onClick={() => setEngine('ai')}
+                        disabled={!aiAvailable}
+                        title={aiAvailable ? '' : 'Configura il proxy AI per abilitarlo'}
+                        className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                          engine === 'ai'
+                            ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm'
+                            : aiAvailable ? 'text-gray-500 hover:text-dimar-dark' : 'text-gray-300 cursor-not-allowed'
+                        }`}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                        </svg>
+                        AI (Claude)
+                      </button>
+                    </div>
+
+                    <div>
+                      <button
+                        onClick={runPlan}
+                        disabled={engine === 'ai' && !aiAvailable}
+                        className="px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-bold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        🚀 Avvia analisi
+                      </button>
+                    </div>
+
+                    {engine === 'ai' && !aiAvailable && (
+                      <div className="mt-5 text-left bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
+                        <p className="font-bold mb-1">⚠️ Proxy AI non configurato</p>
+                        <p className="leading-relaxed">
+                          Per usare Claude serve il backend proxy (la API key non può stare nel browser).
+                          Avvia <code className="bg-amber-100 px-1 rounded">server/</code> e imposta
+                          {' '}<code className="bg-amber-100 px-1 rounded">VITE_AI_PROXY_URL</code> nel file
+                          {' '}<code className="bg-amber-100 px-1 rounded">.env.local</code>. Vedi <code className="bg-amber-100 px-1 rounded">server/README.md</code>.
+                          Nel frattempo usa il motore euristico locale.
+                        </p>
+                      </div>
+                    )}
+
+                    {aiError && (
+                      <div className="mt-5 text-left bg-red-50 border border-red-200 rounded-xl p-4 text-xs text-red-800">
+                        <p className="font-bold mb-1">Errore AI</p>
+                        <p className="leading-relaxed">{aiError}</p>
+                        <p className="mt-2 text-red-600">Verifica che il proxy ({aiProxyUrl() || 'non impostato'}) sia attivo e che la chiave sia valida.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

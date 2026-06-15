@@ -16,13 +16,13 @@ import DataStructurePage from './DataStructurePage';
 
 // Real progress steps for AI mode (each maps to an actual action in runAIPlan)
 const AI_STEPS = [
-  { key: 'prepare', label: 'Preparazione dati candidati e profili arricchiti', pct: 5 },
-  { key: 'payload', label: 'Costruzione payload con top-15 candidati per sezione', pct: 10 },
-  { key: 'send', label: 'Invio richiesta a Claude (claude-opus-4-8)', pct: 15 },
-  { key: 'thinking', label: 'Claude sta ragionando (extended thinking)…', pct: 25 },
-  { key: 'waiting', label: 'In attesa della risposta strutturata…', pct: 50 },
-  { key: 'received', label: 'Risposta ricevuta — validazione schema Zod', pct: 80 },
-  { key: 'assemble', label: 'Assemblaggio piano e clamp budget', pct: 90 },
+  { key: 'prepare', label: 'Preparazione dati e profili arricchiti', pct: 5 },
+  { key: 'payload', label: 'Costruzione payload (top-10 candidati × sezione)', pct: 10 },
+  { key: 'send', label: 'Invio a Claude Opus 4.8 con extended thinking', pct: 15 },
+  { key: 'thinking', label: 'Claude sta analizzando i candidati…', pct: 30 },
+  { key: 'waiting', label: 'Ragionamento in corso — allocazione budget…', pct: 55 },
+  { key: 'received', label: 'Risposta ricevuta — validazione schema', pct: 85 },
+  { key: 'assemble', label: 'Assemblaggio piano e verifica budget', pct: 95 },
   { key: 'done', label: 'Piano completato', pct: 100 },
 ];
 
@@ -33,12 +33,25 @@ function AIThinkingPanel({ progress }) {
   const tema = progress?.tema;
   const stats = progress?.stats;
 
+  // Elapsed timer — shows how long Claude has been thinking
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(0);
+    const t = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [progress?.step]);
+
+  const isThinking = step?.key === 'thinking' || step?.key === 'waiting';
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-md px-6">
         {/* Spinner */}
-        <div className="flex justify-center mb-6">
-          <div className="relative w-16 h-16">
+        <div className="flex justify-center mb-5">
+          <div className="relative w-14 h-14">
             <div className="absolute inset-0 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
             <div className="absolute inset-2 rounded-full border-2 border-fuchsia-200 border-b-fuchsia-500 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
           </div>
@@ -55,22 +68,32 @@ function AIThinkingPanel({ progress }) {
         )}
 
         {/* Progress bar */}
-        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
+        <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden mb-2">
           <div
-            className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full transition-all duration-700 ease-out"
+            className={`h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full transition-all duration-700 ease-out ${isThinking ? 'animate-pulse' : ''}`}
             style={{ width: `${pct}%` }}
           />
         </div>
 
         {/* Percentage + step label */}
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-xs text-gray-500">{step?.label || 'Inizializzazione…'}</span>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-gray-600 font-medium">{step?.label || 'Inizializzazione…'}</span>
           <span className="text-xs font-bold text-violet-600 tabular-nums">{pct}%</span>
         </div>
 
+        {/* Elapsed timer — especially useful during long thinking phase */}
+        {isThinking && (
+          <div className="text-center mb-4">
+            <span className="text-[11px] text-gray-400">
+              Tempo trascorso: <span className="font-mono tabular-nums text-gray-600">{elapsedStr}</span>
+              {elapsed > 30 && <span className="text-violet-500"> — Claude sta analizzando {stats?.candidates || ''} candidati con ragionamento esteso</span>}
+            </span>
+          </div>
+        )}
+
         {/* Stats about the request */}
         {stats && (
-          <div className="grid grid-cols-3 gap-2 mt-2">
+          <div className="grid grid-cols-3 gap-2 mt-3">
             <div className="text-center bg-gray-50 rounded-lg p-2 border border-gray-100">
               <div className="text-lg font-bold text-violet-700 tabular-nums">{stats.sections}</div>
               <div className="text-[10px] text-gray-500 uppercase tracking-wider">Sezioni</div>
@@ -325,9 +348,8 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
 
       // Step 2: build payload with top-15 candidates
       setStep('payload');
-      // Pass current manual selections so Claude sees them as locked/immutable
       const currentSelections = gridState.allSelections[promoCode] || {};
-      const payload = buildAIChannelPayload(channel, weights, 15, promoCode, currentSelections);
+      const payload = buildAIChannelPayload(channel, weights, 10, promoCode, currentSelections);
       if (payload.promos.length === 0) {
         setThinking(false);
         setAiError(`La promo ${promoCode} non ha sezioni/candidati da analizzare.`);

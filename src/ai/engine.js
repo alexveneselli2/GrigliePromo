@@ -663,16 +663,12 @@ export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, to
               m: [Math.round(f.m1), Math.round(f.m2), Math.round(f.m3), Math.round(f.m4)],
               ultimaPromo: f.ultimaPromo || null,
               nVol: f.nVol,
+              // Slim enriched fields — only the ones that help Claude decide
               ...(profile ? {
-                description: profile.description,
-                avgPrice: profile.avgPrice,
-                priceSegment: profile.priceSegment,
                 targetDemo: profile.targetDemo,
-                peakMonths: profile.peakMonths,
                 promoElasticity: profile.promoElasticity,
-                supplierTier: profile.supplierTier,
+                priceSegment: profile.priceSegment,
                 marginTrend: profile.marginTrend,
-                stockRisk: profile.stockRisk,
               } : {}),
             };
           }),

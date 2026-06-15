@@ -11,6 +11,8 @@ import { isAIConfigured, requestAIPlan, aiProxyUrl } from '../../ai/anthropicCli
 import PROMOZIONI from '../../data/promozioni';
 import AISuggestionCard from './AISuggestionCard';
 import AIWeightsTab from './AIWeightsTab';
+import AIDetailReport from './AIDetailReport';
+import DataStructurePage from './DataStructurePage';
 
 const THINKING_STEPS = [
   '🔍 Analisi anagrafica famiglie...',
@@ -199,6 +201,12 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
   const [aiError, setAiError] = useState(null);
   // Progress while running AI one promo at a time: { done, total, current }
   const [aiProgress, setAiProgress] = useState(null);
+  // Stored payload/response for the detail report page
+  const [lastPayload, setLastPayload] = useState(null);
+  const [lastAiResult, setLastAiResult] = useState(null);
+  // Sub-pages
+  const [showDetailReport, setShowDetailReport] = useState(false);
+  const [showDataStructure, setShowDataStructure] = useState(false);
   // accepted[promoCode][`${fc}::${sectionKey}`] = true | false
   const [accepted, setAccepted] = useState({});
 
@@ -265,7 +273,9 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
         setAiError(`La promo ${targetPromo.codice} non ha sezioni/candidati da analizzare.`);
         return;
       }
+      setLastPayload(payload);
       const aiResult = await requestAIPlan(payload);
+      setLastAiResult(aiResult);
       setAiProgress({ done: 1, total: 1, current: null });
       const result = assembleAIPlan(channel, aiResult, weights);
       finishPlan(result, result.insights);
@@ -454,6 +464,14 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
           </button>
           <button onClick={() => setTab('weights')} className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${tab === 'weights' ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-500 hover:text-dimar-dark'}`}>
             Pesi KPI
+          </button>
+          {plan && lastAiResult && (
+            <button onClick={() => setShowDetailReport(true)} className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors border-transparent text-gray-500 hover:text-violet-600`}>
+              Report dettaglio
+            </button>
+          )}
+          <button onClick={() => setShowDataStructure(true)} className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors border-transparent text-gray-500 hover:text-violet-600`}>
+            Struttura dati
           </button>
           <button onClick={() => setTab('about')} className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${tab === 'about' ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-500 hover:text-dimar-dark'}`}>
             Come funziona
@@ -846,6 +864,21 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onC
           </div>
         )}
       </div>
+
+      {showDetailReport && plan && lastAiResult && (
+        <AIDetailReport
+          promoCode={targetPromo?.codice}
+          plan={plan}
+          payload={lastPayload}
+          weights={weights}
+          aiResult={lastAiResult}
+          onClose={() => setShowDetailReport(false)}
+        />
+      )}
+
+      {showDataStructure && (
+        <DataStructurePage onClose={() => setShowDataStructure(false)} />
+      )}
     </div>
   );
 }

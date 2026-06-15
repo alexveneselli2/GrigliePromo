@@ -8,6 +8,7 @@ import PROMOZIONI from '../data/promozioni';
 import ANAGRAFICA from '../data/anagrafica';
 import METRICS from '../data/metrics';
 import { REPARTO_TO_SPAZI } from '../data/reparti';
+import { FAMILY_PROFILES, PROMO_HISTORY, REPARTO_BENCHMARKS } from '../data/enriched';
 import { getSectionsForPromo, getBudgetForRepartoSezione, getPromoTotalBudget } from '../hooks/useGridState';
 
 export const DEFAULT_WEIGHTS = {
@@ -631,21 +632,47 @@ export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, to
           repartoName: repFamilies[0].rn,
           budgetProd: budget.prod,
           budgetCard: budget.card,
-          candidates: ranked.map(({ f }) => ({
-            fc: f.fc,
-            fn: f.fn,
-            settore: f.sn,
-            vendite: Math.round(f.v),
-            marginePct: +(f.margine * 100).toFixed(1),
-            scontriniPct: +(f.ps * 100).toFixed(2),
-            m: [Math.round(f.m1), Math.round(f.m2), Math.round(f.m3), Math.round(f.m4)],
-            ultimaPromo: f.ultimaPromo || null,
-            nVol: f.nVol,
-          })),
+          candidates: ranked.map(({ f }) => {
+            const profile = FAMILY_PROFILES[f.fc];
+            return {
+              fc: f.fc,
+              fn: f.fn,
+              settore: f.sn,
+              vendite: Math.round(f.v),
+              marginePct: +(f.margine * 100).toFixed(1),
+              scontriniPct: +(f.ps * 100).toFixed(2),
+              m: [Math.round(f.m1), Math.round(f.m2), Math.round(f.m3), Math.round(f.m4)],
+              ultimaPromo: f.ultimaPromo || null,
+              nVol: f.nVol,
+              ...(profile ? {
+                description: profile.description,
+                avgPrice: profile.avgPrice,
+                priceSegment: profile.priceSegment,
+                targetDemo: profile.targetDemo,
+                peakMonths: profile.peakMonths,
+                promoElasticity: profile.promoElasticity,
+                supplierTier: profile.supplierTier,
+                marginTrend: profile.marginTrend,
+                stockRisk: profile.stockRisk,
+              } : {}),
+            };
+          }),
         });
       }
       return { key: sec.key, label: sec.label, short: sec.short, reparti };
     }).filter(s => s.reparti.length > 0);
+
+    // Collect which reparti appear in this promo's sections for benchmarks
+    const repartoCodes = new Set();
+    for (const s of sectionPayloads) {
+      for (const r of s.reparti) repartoCodes.add(r.repartoCode);
+    }
+    const repartoBenchmarks = {};
+    for (const rc of repartoCodes) {
+      if (REPARTO_BENCHMARKS[rc]) repartoBenchmarks[rc] = REPARTO_BENCHMARKS[rc];
+    }
+
+    const history = PROMO_HISTORY[promoCode];
 
     return {
       promoCode,
@@ -657,6 +684,12 @@ export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, to
       dataFine: promo.dataFine,
       ruolo: promo.ruoloTema,
       sections: sectionPayloads,
+      repartoBenchmarks,
+      context: history ? {
+        prevYear: history.prevYearResult,
+        competition: history.competitorActivity,
+        seasonal: history.seasonalContext,
+      } : undefined,
     };
   }).filter(p => p.sections.length > 0);
 

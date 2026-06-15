@@ -85,27 +85,79 @@ Regole ferree:
 - Per ogni (sezione × reparto) ti viene dato un budget di spazi PROD e CARD. La somma dei prodCount che assegni in quella sezione/reparto NON deve superare budgetProd. La somma dei cardCount non deve superare budgetCard. cardCount di una famiglia non puo' superare il suo prodCount.
 - Scegli SOLO famiglie presenti nella lista candidates fornita.
 - Concentra piu' spazi (prodCount 2-4) sulle famiglie piu' forti per quella sezione; assegna 1 spazio a quelle marginali; lascia fuori quelle deboli.
-- Usa i KPI forniti: vendite nette, margine %, penetrazione scontrini, andamento mensile (m1-m4 vs periodo della promo = stagionalita'), e l'affinita' tra il nome famiglia e il tema/speciale della sezione.
-- Penalizza le famiglie gia' a volantino di recente (campo ultimaPromo valorizzato, nVol alto) per garantire rotazione tra le promo del quadrimestre.
-- Spiega ogni scelta con 1-3 motivazioni concrete e specifiche (cita il KPI o l'affinita' tematica reale, non frasi generiche).
-- Per ogni scelta stima l'impatto atteso (ricavo incrementale in migliaia di euro, probabilita' uso carta fedelta', engagement) coerente con i KPI forniti: famiglie con vendite/scontrini alti e forte affinita' col tema avranno impatto maggiore.
+
+Criteri di valutazione (in ordine di priorita' secondo i pesi forniti dall'utente):
+- VENDITE: vendite nette nel periodo (campo "vendite"). Le famiglie top-seller del reparto meritano piu' spazi.
+- MARGINE: margine % (campo "marginePct"). Privilegia famiglie che bilanciano volume e redditivita'.
+- SCONTRINI: penetrazione scontrini (campo "scontriniPct"). Indica quanti clienti comprano quella famiglia — alta penetrazione = domanda diffusa.
+- STAGIONALITÀ: andamento mensile (campo "m" = [m1,m2,m3,m4]). Se il mese della promo coincide col picco, la famiglia va privilegiata.
+- AFFINITÀ TEMATICA: valuta semanticamente se il nome famiglia (campo "fn") e' coerente col tema/speciale della sezione. Non limitarti a keyword: ragiona sul significato (es. "Birra artigianale" ha forte affinita' col tema "Aperitivo estivo").
+- ELASTICITÀ PROMO: campo "promoElasticity" (0-1). Famiglie con alta elasticita' rispondono meglio alle promozioni.
+- ROTAZIONE: penalizza le famiglie gia' a volantino di recente (campo "ultimaPromo" valorizzato, "nVol" alto) per garantire varieta' tra le promo del quadrimestre.
+- PROFILO CLIENTE: usa il campo "targetDemo" per diversificare il target nel volantino (non solo famiglie, non solo giovani).
+- TREND MARGINE: campo "marginTrend" (up/stable/down). Preferisci famiglie con trend stabile o in crescita.
+
+Dati di contesto aggiuntivi:
+- Ogni candidato puo' avere: descrizione, segmento prezzo (entry/mainstream/premium), tier fornitore (leader/follower/private-label), rischio stock, e famiglie in cross-sell.
+- Il contesto promo include: risultati anno precedente, attivita' concorrenza, contesto stagionale.
+- I benchmark del reparto indicano margine medio, lift promozionale tipico, penetrazione card e trend.
+Usa questi dati per motivare le scelte e stimare l'impatto in modo piu' accurato.
+
+Per ogni scelta:
+- Spiega con 1-3 motivazioni concrete e specifiche (cita il KPI reale, il match tematico, o il dato di contesto).
+- Stima l'impatto atteso (ricavo incrementale in migliaia di euro, probabilita' uso carta fedelta', engagement) coerente con i KPI e il contesto forniti.
 
 Rispondi esclusivamente nel formato strutturato richiesto.`;
 
 function buildUserPrompt(promo, weights) {
-  return [
+  const lines = [
     `CANALE: ${promo.canale ?? ''}`,
     `PROMO ${promo.promoCode} — Q${promo.quadrimestre ?? '?'} — ${promo.dataInizio ?? ''} → ${promo.dataFine ?? ''}`,
     `Tema: ${promo.tema ?? ''} | Ruolo: ${promo.ruolo ?? ''}`,
-    weights ? `Priorita' richieste (pesi 0-1): ${JSON.stringify(weights)}` : '',
+  ];
+
+  // Explicit weight priorities so the model knows what the user cares about
+  if (weights) {
+    const wLabels = {
+      sales: 'Vendite', margin: 'Margine', scontrini: 'Scontrini',
+      seasonality: 'Stagionalita\'', themeAffinity: 'Affinita\' tematica',
+      roleBoost: 'Ruolo promo', recencyPenalty: 'Rotazione (penalty recency)',
+      saturationPenalty: 'Saturazione (penalty riuso)',
+    };
+    const sorted = Object.entries(weights)
+      .sort(([, a], [, b]) => b - a)
+      .map(([k, v]) => `  ${wLabels[k] || k}: ${v.toFixed(2)}`)
+      .join('\n');
+    lines.push('', 'PRIORITÀ KPI (pesi dall\'utente, dal piu\' importante):');
+    lines.push(sorted);
+    lines.push('Rispetta queste priorita\': dai piu\' peso ai criteri con valore alto.');
+  }
+
+  // Promo context (history, competition, seasonality)
+  if (promo.context) {
+    lines.push('', 'CONTESTO PROMO:');
+    if (promo.context.prevYear)
+      lines.push(`  Anno precedente: ricavi ${promo.context.prevYear.totalRevenue}k, lift medio ${promo.context.prevYear.avgLift}, card ${promo.context.prevYear.cardActivations}, reach ${promo.context.prevYear.customerReach}`);
+    if (promo.context.competition)
+      lines.push(`  Concorrenza: ${promo.context.competition}`);
+    if (promo.context.seasonal)
+      lines.push(`  Stagione: ${promo.context.seasonal}`);
+  }
+
+  // Reparto benchmarks
+  if (promo.repartoBenchmarks) {
+    lines.push('', 'BENCHMARK PER REPARTO:');
+    lines.push(JSON.stringify(promo.repartoBenchmarks, null, 1));
+  }
+
+  lines.push(
     '',
-    'Sezioni e candidati (con budget e KPI):',
+    'SEZIONI E CANDIDATI (con budget, KPI e profilo arricchito):',
     JSON.stringify(promo.sections, null, 1),
     '',
     'Per ogni sezione/reparto seleziona le famiglie e assegna prodCount/cardCount rispettando i budget. Restituisci anche una frase di insight sulla strategia complessiva della promo.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  );
+  return lines.filter(Boolean).join('\n');
 }
 
 async function planForPromo(promo, weights) {

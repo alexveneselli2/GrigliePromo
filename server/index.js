@@ -56,6 +56,12 @@ app.use((req, res, next) => {
 app.get('/health', (_req, res) => res.json({ ok: true, model: MODEL, ai: HAS_KEY }));
 
 // ---- Structured-output schema returned by Claude (per promo) ----
+const ImpactSchema = z.object({
+  expectedRevenueK: z.number().describe('Ricavo incrementale atteso durante la promo, in migliaia di euro (es. 12.5 = 12.500€). Stima basata su vendite, stagionalita\' e affinita\' col tema.'),
+  cardProb: z.number().int().describe('Probabilita\' 0-100 che la famiglia spinga l\'uso della carta fedelta\', derivata dalla penetrazione scontrini.'),
+  engagement: z.number().int().describe('Engagement atteso 0-100: mix di penetrazione scontrini e affinita\' tematica.'),
+});
+
 const PickSchema = z.object({
   fc: z.string().describe('Family code (IV-level ECR) chosen, taken from the candidates list'),
   sectionKey: z.string().describe('Section key: tema | sotto | s1 | s2 | s3 | s4'),
@@ -63,8 +69,9 @@ const PickSchema = z.object({
   cardCount: z.number().int().describe('Number of CARD slots, must be <= prodCount and within the card budget'),
   score: z.number().int().describe('Suitability score 0-100'),
   confidence: z.number().int().describe('Confidence 0-100'),
-  reason: z.string().describe('One concise sentence in Italian explaining why this family fits this section'),
+  reasons: z.array(z.string()).describe('Da 1 a 3 motivazioni concise in italiano, ognuna che cita un KPI reale o l\'affinita\' tematica (es. "Top vendite del reparto", "Forte stagionalita\' nel periodo").'),
   warning: z.string().describe('Short Italian caveat if any (e.g. already in a recent flyer), or empty string'),
+  impact: ImpactSchema.describe('Stima quantitativa dell\'impatto atteso di questa scelta.'),
 });
 
 const PromoResultSchema = z.object({
@@ -80,7 +87,8 @@ Regole ferree:
 - Concentra piu' spazi (prodCount 2-4) sulle famiglie piu' forti per quella sezione; assegna 1 spazio a quelle marginali; lascia fuori quelle deboli.
 - Usa i KPI forniti: vendite nette, margine %, penetrazione scontrini, andamento mensile (m1-m4 vs periodo della promo = stagionalita'), e l'affinita' tra il nome famiglia e il tema/speciale della sezione.
 - Penalizza le famiglie gia' a volantino di recente (campo ultimaPromo valorizzato, nVol alto) per garantire rotazione tra le promo del quadrimestre.
-- Spiega ogni scelta con una frase concreta e specifica (cita il KPI o l'affinita' tematica reale).
+- Spiega ogni scelta con 1-3 motivazioni concrete e specifiche (cita il KPI o l'affinita' tematica reale, non frasi generiche).
+- Per ogni scelta stima l'impatto atteso (ricavo incrementale in migliaia di euro, probabilita' uso carta fedelta', engagement) coerente con i KPI forniti: famiglie con vendite/scontrini alti e forte affinita' col tema avranno impatto maggiore.
 
 Rispondi esclusivamente nel formato strutturato richiesto.`;
 

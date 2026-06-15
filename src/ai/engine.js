@@ -573,6 +573,12 @@ export function generatePlanInsights(richByPromo, channelPromos) {
 // ---------------------------------------------------------------------------
 
 // Build families enriched with this promo's metrics.
+//
+// ⚠️ LIVE-DATA SEAM: this is the single point where promo KPIs enter the AI
+// pipeline. Today it reads the mockup files (METRICS, ANAGRAFICA). To go live,
+// swap the two sources below for a fetch/DB call returning the same shape
+// ({ fc, fn, rc, rn, sn, v, m, ps, m1..m4, ultima, penultima, nVol, nPromo });
+// nothing else in the engine or the AI prompt needs to change.
 function buildFamiliesForPromo(promoCode) {
   const metrics = METRICS[promoCode] || {};
   return ANAGRAFICA.map(a => {
@@ -720,10 +726,34 @@ export function assembleAIPlan(channelCode, aiResult, weights = DEFAULT_WEIGHTS)
       repRem.prod -= prodCount;
       repRem.card -= cardCount;
 
+      // Score components are factual KPI ratios (real data, live-ready) used for
+      // the score-breakdown bars; they are not the AI's opinion.
       const base = computeBaseScore(family, promo, sec, weights, salesNorm, marginNorm, psNorm);
-      const impact = predictImpact(family, base.components, sec);
 
-      const reasons = [{ icon: 'theme', text: pick.reason || 'Selezionata dall’AI', strength: 'high' }];
+      // Impact: prefer Claude's own estimate; fall back to the local simulation
+      // only if the model didn't return one.
+      let impact;
+      let aiImpact = false;
+      if (pick.impact && typeof pick.impact.expectedRevenueK === 'number') {
+        aiImpact = true;
+        impact = {
+          expectedRevenue: pick.impact.expectedRevenueK * 1000,
+          cardProb: Math.max(0, Math.min(1, (pick.impact.cardProb ?? 0) / 100)),
+          engagement: Math.max(0, Math.min(1, (pick.impact.engagement ?? 0) / 100)),
+        };
+      } else {
+        impact = predictImpact(family, base.components, sec);
+      }
+
+      // Reasoning: Claude's own bullets (reasons[]), with a back-compat fallback
+      // to a single `reason` field if an older payload arrives.
+      const aiReasons = Array.isArray(pick.reasons) && pick.reasons.length
+        ? pick.reasons
+        : (pick.reason ? [pick.reason] : []);
+      const reasons = aiReasons.map(text => ({ icon: 'theme', text, strength: 'high' }));
+      if (reasons.length === 0) {
+        reasons.push({ icon: 'theme', text: 'Selezionata dall’AI', strength: 'high' });
+      }
       if (prodCount >= 3) {
         reasons.unshift({ icon: 'role', text: `L'AI concentra ${prodCount} spazi su questa famiglia`, strength: 'high' });
       } else if (prodCount === 2) {
@@ -748,7 +778,10 @@ export function assembleAIPlan(channelCode, aiResult, weights = DEFAULT_WEIGHTS)
         components: base.components,
         reasons,
         warnings,
-        impact: { ...impact, expectedRevenue: impact.expectedRevenue * prodCount },
+        // Claude's estimate already accounts for the chosen slots; the local
+        // simulation is per-slot, so only the latter is scaled by prodCount.
+        impact: aiImpact ? impact : { ...impact, expectedRevenue: impact.expectedRevenue * prodCount },
+        aiImpact,
         alternatives: [],
         satPenalty: 0,
         usageBefore: 0,

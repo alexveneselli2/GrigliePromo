@@ -219,7 +219,7 @@ export default function AISuggestionCard({ suggestion, accepted, onToggle }) {
       {/* Predicted impact */}
       <div className="px-4 py-3 border-t border-gray-50 bg-violet-50/30">
         <div className="text-[9px] uppercase tracking-wider font-bold text-violet-600 mb-1.5 flex items-center justify-between">
-          <span>Impatto previsto (sim.)</span>
+          <span>Impatto previsto ({s.aiImpact ? 'stima Claude' : 'sim.'})</span>
           {s.prodCount > 1 && (
             <span className="text-[9px] text-gray-500 font-normal normal-case tracking-normal">
               su {s.prodCount} slot

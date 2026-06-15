@@ -23,7 +23,7 @@ const THINKING_STEPS = [
   '✨ Generazione confidence + reasoning...',
 ];
 
-function ThinkingAnimation({ done }) {
+function ThinkingAnimation({ done, progress }) {
   const [stepIdx, setStepIdx] = useState(0);
   useEffect(() => {
     if (done) return;
@@ -33,6 +33,8 @@ function ThinkingAnimation({ done }) {
     return () => clearInterval(t);
   }, [done]);
 
+  const pct = progress && progress.total ? Math.round((progress.done / progress.total) * 100) : null;
+
   return (
     <div className="flex flex-col items-center justify-center h-64 gap-5">
       <div className="relative w-16 h-16">
@@ -41,7 +43,22 @@ function ThinkingAnimation({ done }) {
       </div>
       <div className="text-center min-h-[2rem]">
         <p className="text-sm text-violet-700 font-semibold animate-pulse">{THINKING_STEPS[stepIdx]}</p>
-        <p className="text-xs text-gray-400 mt-1">Il modello sta ragionando sull'intero portafoglio</p>
+        {progress ? (
+          <>
+            <p className="text-xs text-gray-500 mt-1">
+              {progress.current
+                ? <>Analisi promo <strong>{progress.current}</strong> ({progress.done + 1}/{progress.total})</>
+                : <>Composizione del piano…</>}
+            </p>
+            {pct != null && (
+              <div className="w-56 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2 mx-auto">
+                <div className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-full transition-all" style={{ width: `${pct}%` }} />
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-xs text-gray-400 mt-1">Il modello sta ragionando sull'intero portafoglio</p>
+        )}
       </div>
     </div>
   );
@@ -180,6 +197,8 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
   const aiAvailable = isAIConfigured();
   const [engine, setEngine] = useState(aiAvailable ? 'ai' : 'heuristic');
   const [aiError, setAiError] = useState(null);
+  // Progress while running AI one promo at a time: { done, total, current }
+  const [aiProgress, setAiProgress] = useState(null);
   // accepted[promoCode][`${fc}::${sectionKey}`] = true | false
   const [accepted, setAccepted] = useState({});
 
@@ -221,12 +240,28 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     setAccepted({});
     setAiError(null);
     try {
-      const payload = buildAIChannelPayload(channel, weights);
-      const aiResult = await requestAIPlan(payload);
-      const result = assembleAIPlan(channel, aiResult, weights);
+      // One channel at a time (this panel is per-channel) and one promo per
+      // request: smaller, reliable calls instead of one huge multi-promo output.
+      const total = channelPromos.length;
+      setAiProgress({ done: 0, total, current: channelPromos[0]?.codice || null });
+      const promosOut = [];
+      let model = null;
+      for (let i = 0; i < channelPromos.length; i++) {
+        const promo = channelPromos[i];
+        setAiProgress({ done: i, total, current: promo.codice });
+        const payload = buildAIChannelPayload(channel, weights, 8, promo.codice);
+        if (payload.promos.length === 0) continue; // no sections/candidates for this promo
+        const aiResult = await requestAIPlan(payload);
+        model = aiResult?.model || model;
+        for (const p of (aiResult?.promos || [])) promosOut.push(p);
+      }
+      setAiProgress({ done: total, total, current: null });
+      const result = assembleAIPlan(channel, { model, promos: promosOut }, weights);
       finishPlan(result, result.insights);
+      setAiProgress(null);
     } catch (err) {
       setThinking(false);
+      setAiProgress(null);
       setAiError(err?.message || 'Errore durante la chiamata AI');
     }
   };
@@ -490,7 +525,7 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
                 </div>
               )}
 
-              {thinking && <div className="flex-1 flex items-center justify-center"><ThinkingAnimation /></div>}
+              {thinking && <div className="flex-1 flex items-center justify-center"><ThinkingAnimation progress={aiProgress} /></div>}
 
               {plan && (
                 <>

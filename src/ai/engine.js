@@ -589,9 +589,10 @@ function buildFamiliesForPromo(promoCode) {
 
 // Build the compact candidate payload sent to Claude (via the proxy).
 // Prefilters to the top-K families per (section × reparto) so the prompt stays bounded.
-export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, topK = 8) {
+export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, topK = 8, onlyPromoCode = null) {
   const channelPromos = PROMOZIONI
     .filter(p => p.canale === channelCode)
+    .filter(p => !onlyPromoCode || p.codice === onlyPromoCode)
     .sort((a, b) => (a.dataInizio || '').localeCompare(b.dataInizio || ''));
 
   const promos = channelPromos.map(promo => {

@@ -101,19 +101,36 @@ function buildUserPrompt(promo, weights) {
 }
 
 async function planForPromo(promo, weights) {
-  const response = await client.beta.messages.parse({
+  // The per-promo structured JSON can be large (many picks, each with reason/
+  // warning text), so we give it plenty of headroom. Above ~16k max_tokens the
+  // SDK requires streaming to avoid HTTP timeouts — so we stream and read the
+  // final message, then validate it against the Zod schema.
+  const stream = client.beta.messages.stream({
     model: MODEL,
-    max_tokens: 16000,
+    max_tokens: 32000,
     system: SYSTEM_PROMPT,
     output_format: betaZodOutputFormat(PromoResultSchema),
     messages: [{ role: 'user', content: buildUserPrompt(promo, weights) }],
   });
 
+  const response = await stream.finalMessage();
+
   if (response.stop_reason === 'max_tokens') {
     throw new Error(`Output troncato per promo ${promo.promoCode} — max_tokens raggiunto`);
   }
 
-  const parsed = response.parsed_output;
+  // With output_format set, the SDK exposes the validated result on the final
+  // message; fall back to parsing the text content if needed.
+  let parsed = response.parsed_output;
+  if (!parsed) {
+    const text = (response.content || [])
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    if (text) {
+      parsed = PromoResultSchema.parse(JSON.parse(text));
+    }
+  }
   if (!parsed) {
     throw new Error(`Model returned no parseable output for promo ${promo.promoCode} (stop_reason=${response.stop_reason})`);
   }

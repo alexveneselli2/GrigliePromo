@@ -104,11 +104,14 @@ async function planForPromo(promo, weights) {
   const response = await client.beta.messages.parse({
     model: MODEL,
     max_tokens: 16000,
-    thinking: { type: 'adaptive' },
     system: SYSTEM_PROMPT,
     output_format: betaZodOutputFormat(PromoResultSchema),
     messages: [{ role: 'user', content: buildUserPrompt(promo, weights) }],
   });
+
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error(`Output troncato per promo ${promo.promoCode} — max_tokens raggiunto`);
+  }
 
   const parsed = response.parsed_output;
   if (!parsed) {

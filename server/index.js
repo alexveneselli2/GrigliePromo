@@ -161,6 +161,22 @@ app.post('/api/ai/plan', async (req, res) => {
   if (!Array.isArray(promos) || promos.length === 0) {
     return res.status(400).json({ error: 'Body must include a non-empty "promos" array.' });
   }
+
+  // Extended thinking on a full promo can take well over a minute. Render (and
+  // most proxies) drop a connection that transfers no bytes for ~100s. So we
+  // open the 200 response immediately and write a whitespace heartbeat while the
+  // model works — JSON.parse() ignores leading whitespace, so the final body
+  // stays valid JSON. Errors after headers are sent are reported as a JSON
+  // body with an `error` field (the client checks for it).
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no', // disable proxy buffering so heartbeats flush
+  });
+  const heartbeat = setInterval(() => {
+    try { res.write(' '); } catch { /* socket gone */ }
+  }, 15000);
+
   try {
     const out = [];
     // Sequential per-promo calls keep each request (and its output) bounded.
@@ -168,11 +184,12 @@ app.post('/api/ai/plan', async (req, res) => {
       const result = await planForPromo(promo, weights);
       out.push({ promoCode: promo.promoCode, ...result });
     }
-    res.json({ model: MODEL, promos: out });
+    clearInterval(heartbeat);
+    res.end(JSON.stringify({ model: MODEL, promos: out }));
   } catch (err) {
+    clearInterval(heartbeat);
     console.error('[ai/plan] error:', err?.message || err);
-    const status = err?.status && Number.isInteger(err.status) ? err.status : 500;
-    res.status(status).json({ error: err?.message || 'AI request failed' });
+    res.end(JSON.stringify({ error: err?.message || 'AI request failed' }));
   }
 });
 

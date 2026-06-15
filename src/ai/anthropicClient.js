@@ -42,5 +42,11 @@ export async function requestAIPlan(payload, { signal } = {}) {
     }
     throw new Error(`Errore proxy AI (${res.status})${detail}`);
   }
-  return res.json();
+  const data = await res.json();
+  // The proxy may open a 200 response (heartbeat keepalive) and only later hit
+  // an error; in that case the body carries an `error` field instead of promos.
+  if (data && data.error) {
+    throw new Error(`Errore AI — ${data.error}`);
+  }
+  return data;
 }

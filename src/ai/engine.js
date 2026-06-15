@@ -596,7 +596,7 @@ function buildFamiliesForPromo(promoCode) {
 
 // Build the compact candidate payload sent to Claude (via the proxy).
 // Prefilters to the top-K families per (section × reparto) so the prompt stays bounded.
-export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, topK = 8, onlyPromoCode = null) {
+export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, topK = 8, onlyPromoCode = null, currentSelections = {}) {
   const channelPromos = PROMOZIONI
     .filter(p => p.canale === channelCode)
     .filter(p => !onlyPromoCode || p.codice === onlyPromoCode)
@@ -618,16 +618,35 @@ export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, to
 
     const sectionPayloads = sections.map(sec => {
       const reparti = [];
+      // currentSelections for this promo: { fc: { sectionKey: { p, c } } }
+      const promoSel = currentSelections || {};
+
       for (const [repartoCode, repFamilies] of Object.entries(byReparto)) {
         const budget = getBudgetForRepartoSezione(promoCode, sec.key, repartoCode);
         if (!budget.prod) continue;
+
+        // Locked families: manual selections the user already confirmed
+        const locked = [];
+        let lockedProd = 0;
+        let lockedCard = 0;
+        for (const f of repFamilies) {
+          const sel = promoSel[f.fc]?.[sec.key];
+          if (sel && (sel.p > 0 || sel.c > 0)) {
+            locked.push({ fc: f.fc, fn: f.fn, prodCount: sel.p || 0, cardCount: sel.c || 0 });
+            lockedProd += (sel.p || 0);
+            lockedCard += (sel.c || 0);
+          }
+        }
+        const lockedFcs = new Set(locked.map(l => l.fc));
+
         const ranked = repFamilies
-          .filter(f => f.v > 0)
+          .filter(f => f.v > 0 && !lockedFcs.has(f.fc))
           .map(f => ({ f, s: computeBaseScore(f, promo, sec, weights, salesNorm, marginNorm, psNorm).score }))
           .sort((a, b) => b.s - a.s)
           .slice(0, topK);
-        if (ranked.length === 0) continue;
-        reparti.push({
+        if (ranked.length === 0 && locked.length === 0) continue;
+
+        const repartoPayload = {
           repartoCode,
           repartoName: repFamilies[0].rn,
           budgetProd: budget.prod,
@@ -657,7 +676,13 @@ export function buildAIChannelPayload(channelCode, weights = DEFAULT_WEIGHTS, to
               } : {}),
             };
           }),
-        });
+        };
+        if (locked.length > 0) {
+          repartoPayload.locked = locked;
+          repartoPayload.lockedProd = lockedProd;
+          repartoPayload.lockedCard = lockedCard;
+        }
+        reparti.push(repartoPayload);
       }
       return { key: sec.key, label: sec.label, short: sec.short, reparti };
     }).filter(s => s.reparti.length > 0);

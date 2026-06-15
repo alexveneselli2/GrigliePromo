@@ -325,7 +325,9 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
 
       // Step 2: build payload with top-15 candidates
       setStep('payload');
-      const payload = buildAIChannelPayload(channel, weights, 15, promoCode);
+      // Pass current manual selections so Claude sees them as locked/immutable
+      const currentSelections = gridState.allSelections[promoCode] || {};
+      const payload = buildAIChannelPayload(channel, weights, 15, promoCode, currentSelections);
       if (payload.promos.length === 0) {
         setThinking(false);
         setAiError(`La promo ${promoCode} non ha sezioni/candidati da analizzare.`);
@@ -954,14 +956,16 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
       </div>
 
       {showDetailReport && plan && lastAiResult && (
-        <AIDetailReport
-          promoCode={targetPromo?.codice}
-          plan={plan}
-          payload={lastPayload}
-          weights={weights}
-          aiResult={lastAiResult}
-          onClose={() => setShowDetailReport(false)}
-        />
+        <div className="fixed inset-0 z-[60] bg-white overflow-y-auto">
+          <AIDetailReport
+            promoCode={targetPromo?.codice}
+            plan={plan}
+            payload={lastPayload}
+            weights={weights}
+            aiResult={lastAiResult}
+            onClose={() => setShowDetailReport(false)}
+          />
+        </div>
       )}
 
       {showDataStructure && (

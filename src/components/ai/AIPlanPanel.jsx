@@ -184,7 +184,7 @@ function InsightCard({ insight }) {
   );
 }
 
-export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo }) {
+export default function AIPlanPanel({ channel, selectedPromoCode, gridState, onClose, onSelectPromo }) {
   const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
   const [thinking, setThinking] = useState(false);
   const [plan, setPlan] = useState(null);
@@ -208,6 +208,13 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     [channel]
   );
 
+  // The AI works on a single promo: the one currently selected (falls back to
+  // the first of the channel if none is selected).
+  const targetPromo = useMemo(
+    () => channelPromos.find(p => p.codice === selectedPromoCode) || channelPromos[0] || null,
+    [channelPromos, selectedPromoCode]
+  );
+
   const finishPlan = (result, insights) => {
     const preAccepted = {};
     for (const promoCode of Object.keys(result.richByPromo)) {
@@ -218,7 +225,10 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     }
     setAccepted(preAccepted);
     setPlan({ ...result, insights });
-    setActivePromo(result.channelPromos[0]?.codice || null);
+    // Focus the first promo that actually has suggestions (the analysed one).
+    const firstWithSuggestions = Object.keys(result.richByPromo)
+      .find(code => (result.richByPromo[code] || []).length > 0);
+    setActivePromo(firstWithSuggestions || result.channelPromos[0]?.codice || null);
     setThinking(false);
   };
 
@@ -240,25 +250,24 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
     setAccepted({});
     setAiError(null);
     try {
-      // One channel at a time (this panel is per-channel) and one promo per
-      // request: smaller, reliable calls instead of one huge multi-promo output.
-      const total = channelPromos.length;
-      setAiProgress({ done: 0, total, current: channelPromos[0]?.codice || null });
-      const promosOut = [];
-      let model = null;
-      for (let i = 0; i < channelPromos.length; i++) {
-        const promo = channelPromos[i];
-        setAiProgress({ done: i, total, current: promo.codice });
-        // top-15 candidates per section/reparto: gives Claude real room to
-        // explore rather than just refining a narrow heuristic preselection.
-        const payload = buildAIChannelPayload(channel, weights, 15, promo.codice);
-        if (payload.promos.length === 0) continue; // no sections/candidates for this promo
-        const aiResult = await requestAIPlan(payload);
-        model = aiResult?.model || model;
-        for (const p of (aiResult?.promos || [])) promosOut.push(p);
+      // The AI analyses ONLY the selected promo — a single, focused request.
+      if (!targetPromo) {
+        setThinking(false);
+        setAiError('Nessuna promo selezionata da analizzare.');
+        return;
       }
-      setAiProgress({ done: total, total, current: null });
-      const result = assembleAIPlan(channel, { model, promos: promosOut }, weights);
+      setAiProgress({ done: 0, total: 1, current: targetPromo.codice });
+      // top-15 candidates per section/reparto: gives Claude real room to
+      // explore rather than just refining a narrow heuristic preselection.
+      const payload = buildAIChannelPayload(channel, weights, 15, targetPromo.codice);
+      if (payload.promos.length === 0) {
+        setThinking(false);
+        setAiError(`La promo ${targetPromo.codice} non ha sezioni/candidati da analizzare.`);
+        return;
+      }
+      const aiResult = await requestAIPlan(payload);
+      setAiProgress({ done: 1, total: 1, current: null });
+      const result = assembleAIPlan(channel, aiResult, weights);
       finishPlan(result, result.insights);
       setAiProgress(null);
     } catch (err) {
@@ -464,7 +473,7 @@ export default function AIPlanPanel({ channel, gridState, onClose, onSelectPromo
                     </h3>
                     <p className="text-sm text-gray-500 mb-5">
                       {engine === 'ai'
-                        ? <>Claude analizzerà le <strong>{channelPromos.length} promo</strong> del canale {channel} e proporrà famiglie e quantità di spazi per ogni sezione, rispettando i budget.</>
+                        ? <>Claude analizzerà la promo <strong>{targetPromo?.codice || '—'}</strong>{targetPromo?.tema ? <> ({targetPromo.tema.split(' - ')[0]})</> : null} del canale {channel} e proporrà famiglie e quantità di spazi per ogni sezione, rispettando i budget.</>
                         : <>Il motore euristico locale analizzerà le <strong>{channelPromos.length} promo</strong> del canale {channel} con 8 KPI per generare suggerimenti con confidenza, reasoning e impatto stimato.</>}
                     </p>
 

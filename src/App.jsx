@@ -95,6 +95,7 @@ export default function App() {
       {aiOpen && (
         <AIPlanPanel
           channel={selectedChannel}
+          selectedPromoCode={effectivePromoCode}
           gridState={gridState}
           onClose={() => setAIOpen(false)}
           onSelectPromo={handlePromoChange}

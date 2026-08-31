@@ -23,13 +23,56 @@ const pool = DATABASE_URL
     })
   : null;
 
+// A pooled client that dies while idle — exactly what a database restart does —
+// makes node-postgres emit 'error' on the Pool. An EventEmitter that emits
+// 'error' with no listener terminates the process, so without this handler a
+// brief Postgres blip takes the whole web service down with it. Reproduced:
+// stopping Postgres with an idle client in the pool killed Node with exit 1.
+if (pool) {
+  pool.on('error', (err) => {
+    console.error('[db] client inattivo caduto (il pool si riprende da solo):', err?.message || err);
+  });
+}
+
 export function hasDb() {
   return !!pool;
 }
 
-export async function query(text, params) {
+// Connection-level failures that are worth retrying: the database is briefly
+// unreachable (restart, failover) rather than the query being wrong.
+const TRANSITORI = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'ENOENT', 'EHOSTUNREACH',
+  '57P01', // admin_shutdown
+  '57P03', // cannot_connect_now — server still starting
+  '08006', '08001', '08004', // connection failures
+]);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function query(text, params, tentativi = 3) {
   if (!pool) throw new Error('DATABASE_URL non configurato: nessun database disponibile.');
-  return pool.query(text, params);
+  let ultimo;
+  for (let i = 0; i < tentativi; i++) {
+    try {
+      return await pool.query(text, params);
+    } catch (err) {
+      ultimo = err;
+      if (!TRANSITORI.has(err?.code) || i === tentativi - 1) throw err;
+      // Short backoff: a Postgres restart is usually back within seconds.
+      await sleep(300 * (i + 1));
+      console.warn(`[db] connessione fallita (${err.code}), ritento ${i + 1}/${tentativi - 1}`);
+    }
+  }
+  throw ultimo;
+}
+
+// Raw driver errors leak the database's internal address (e.g. "connect
+// ECONNREFUSED 10.24.249.13:5432"), which tells the user nothing useful.
+export function messaggioErrore(err) {
+  if (TRANSITORI.has(err?.code)) {
+    return 'Database temporaneamente non raggiungibile. Riprova tra qualche istante.';
+  }
+  return err?.message || 'Errore interno.';
 }
 
 export async function withTransaction(fn) {

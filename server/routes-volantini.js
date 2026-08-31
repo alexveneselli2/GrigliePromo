@@ -6,7 +6,7 @@
 
 import express from 'express';
 import multer from 'multer';
-import { query, hasDb } from './db.js';
+import { query, hasDb, messaggioErrore } from './db.js';
 import { analizzaVolantino, riepilogo, contaPagine, riclassifica } from './volantini.js';
 import { esportaLista, esportaVolantini, TIPI_EXPORT } from './export-xlsx.js';
 
@@ -399,7 +399,7 @@ export default function volantiniRouter() {
   router.use((err, _req, res, _next) => {
     console.error('[volantini] ', err?.message || err);
     const status = err?.code === 'LIMIT_FILE_SIZE' ? 413 : 500;
-    res.status(status).json({ error: err?.message || 'Errore interno.' });
+    res.status(status).json({ error: messaggioErrore(err) });
   });
 
   return router;

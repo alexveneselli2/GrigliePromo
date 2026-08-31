@@ -159,7 +159,10 @@ const FAMIGLIE_TECNICHE = /ESAURIT|NON CLASS|CAUZION|BATTUTE REP|BUONI SCONTO|DA
 // than any real error. At 0.75 only ~11% of correct matches passed; spot checks
 // showed matches down to ~0.60 are reliable.
 const SIM_SICURA = 0.60;  // accept as-is
-const SIM_MINIMA = 0.45;  // accept but ask the user to confirm
+// Below this the catalogue match is worse than letting Claude classify from
+// the ECR vocabulary: measured on the real flyer, AI results sat at 80-99%
+// confidence while catalogue matches in the 0.40-0.55 band were weak.
+const SIM_MINIMA = 0.55;
 
 async function matchCatalogo(descrizione) {
   const norm = normalizza(descrizione);

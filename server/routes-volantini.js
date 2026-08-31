@@ -159,10 +159,30 @@ export default function volantiniRouter() {
   });
 
   // ---- re-run classification only (no vision pass, so cheap) --------------
+  // Re-classifying 300+ articles takes minutes and Render drops a connection
+  // that transfers nothing for ~300s, so answer immediately and work in the
+  // background — same pattern as upload. The client polls the detail endpoint.
   router.post('/:id/riclassifica', async (req, res, next) => {
     try {
-      const out = await riclassifica(Number(req.params.id));
-      res.json(out);
+      const id = Number(req.params.id);
+      const esiste = await query('SELECT id FROM volantini WHERE id = $1', [id]);
+      if (esiste.rows.length === 0) return res.status(404).json({ error: 'Volantino non trovato.' });
+
+      await query(`UPDATE volantini SET stato = 'in_analisi', errore = NULL WHERE id = $1`, [id]);
+      res.status(202).json({ avviata: true });
+
+      riclassifica(id)
+        .then(async (out) => {
+          await query(`UPDATE volantini SET stato = 'completato' WHERE id = $1`, [id]);
+          console.log(`[volantini] #${id} riclassificato: ${out.aggiornati} articoli, ${out.daRivedere} da rivedere`);
+        })
+        .catch(async (err) => {
+          console.error(`[volantini] #${id} riclassificazione fallita:`, err?.message || err);
+          try {
+            await query(`UPDATE volantini SET stato = 'errore', errore = $1 WHERE id = $2`,
+              [String(err?.message || err).slice(0, 500), id]);
+          } catch { /* best effort */ }
+        });
     } catch (err) { next(err); }
   });
 

@@ -75,6 +75,28 @@ export function messaggioErrore(err) {
   return err?.message || 'Errore interno.';
 }
 
+// Actually talks to the database, unlike hasDb() which only says whether a
+// URL is configured. Used by /health so "db: true" means something.
+export async function pingDb() {
+  if (!pool) return { ok: false, motivo: 'DATABASE_URL non configurato' };
+  const t0 = Date.now();
+  try {
+    const r = await query(
+      `SELECT pg_database_size(current_database()) AS byte,
+              (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS connessioni`,
+      [], 1 // no retry: health must report the state now, not after backoff
+    );
+    return {
+      ok: true,
+      ms: Date.now() - t0,
+      dimensioneMb: Math.round(Number(r.rows[0].byte) / 1024 / 1024),
+      connessioni: Number(r.rows[0].connessioni),
+    };
+  } catch (err) {
+    return { ok: false, motivo: err?.code || err?.message, ms: Date.now() - t0 };
+  }
+}
+
 export async function withTransaction(fn) {
   if (!pool) throw new Error('DATABASE_URL non configurato: nessun database disponibile.');
   const client = await pool.connect();

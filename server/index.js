@@ -16,7 +16,7 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { initSchema, hasDb } from './db.js';
+import { initSchema, hasDb, pingDb } from './db.js';
 import volantiniRouter from './routes-volantini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,13 +62,19 @@ app.use((req, res, next) => {
   })(req, res, next);
 });
 
-app.get('/health', (_req, res) => res.json({
-  ok: true,
-  model: MODEL,
-  ai: HAS_KEY,
-  db: hasDb(),
-  volantini: hasDb() && HAS_KEY,
-}));
+app.get('/health', async (_req, res) => {
+  // Actually query the database: reporting db:true just because a URL is set
+  // made /health useless exactly when it mattered.
+  const db = hasDb() ? await pingDb() : { ok: false, motivo: 'DATABASE_URL non configurato' };
+  res.json({
+    ok: true,
+    model: MODEL,
+    ai: HAS_KEY,
+    db: db.ok,
+    dbInfo: db,
+    volantini: db.ok && HAS_KEY,
+  });
+});
 
 // ---- Volantini (flyer cataloguing) ----
 app.use('/api/volantini', volantiniRouter());

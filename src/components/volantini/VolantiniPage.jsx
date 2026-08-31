@@ -374,6 +374,8 @@ function Dettaglio({ id, onBack }) {
     carica();
   };
 
+  const [repartoAttivo, setRepartoAttivo] = useState(null);
+
   const perReparto = useMemo(() => {
     if (!data) return [];
     const map = new Map();
@@ -388,6 +390,14 @@ function Dettaglio({ id, onBack }) {
     }
     return [...map.values()].sort((a, b) => b.articoli - a.articoli);
   }, [data]);
+
+  // Selected reparto: defaults to the largest, and self-heals if the current
+  // choice disappears (e.g. after a re-classification moves every article out).
+  const repartoCorrente = useMemo(
+    () => perReparto.find((r) => r.reparto === repartoAttivo) || perReparto[0] || null,
+    [perReparto, repartoAttivo]
+  );
+  const maxArticoliReparto = perReparto[0]?.articoli || 0;
 
   if (errore) return (
     <div className="p-6">
@@ -476,45 +486,94 @@ function Dettaglio({ id, onBack }) {
       </div>
 
       {tab === 'riepilogo' && (
-        <div className="space-y-4">
-          {perReparto.length === 0 && (
-            <p className="text-center text-sm text-gray-400 py-10">Nessun articolo catalogato.</p>
-          )}
-          {perReparto.map((rep) => (
-            <div key={rep.reparto} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-3">
-                <h4 className="text-sm font-bold text-dimar-dark">{rep.reparto}</h4>
-                <span className="ml-auto text-[11px] text-gray-500">
-                  <strong className="text-dimar-red">{rep.articoli}</strong> articoli ·
-                  <strong className="text-violet-600"> {rep.in_evidenza}</strong> in evidenza ·
-                  <strong className="text-emerald-600"> {rep.in_zona_fornitore}</strong> in zone fornitore
-                </span>
-              </div>
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="border-b border-gray-100 text-gray-400">
-                    <th className="text-left px-4 py-1.5 font-semibold">Famiglia ECR</th>
-                    <th className="text-right px-3 py-1.5 font-semibold">Articoli</th>
-                    <th className="text-right px-3 py-1.5 font-semibold">In evidenza</th>
-                    <th className="text-right px-3 py-1.5 font-semibold">In zona forn.</th>
-                    <th className="text-right px-4 py-1.5 font-semibold">Da rivedere</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rep.famiglie.map((f, i) => (
-                    <tr key={i} className="border-b border-gray-50 hover:bg-red-50/20">
-                      <td className="px-4 py-1.5 text-gray-700">{f.famiglia || <span className="text-gray-300">non classificato</span>}</td>
-                      <td className="px-3 py-1.5 text-right font-mono font-bold">{f.articoli}</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-violet-600">{f.in_evidenza}</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{f.in_zona_fornitore}</td>
-                      <td className="px-4 py-1.5 text-right font-mono text-amber-600">{f.da_rivedere}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        perReparto.length === 0 ? (
+          <p className="text-center text-sm text-gray-400 py-10">Nessun articolo catalogato.</p>
+        ) : (
+          <div className="space-y-4">
+            {/* Master: one card per reparto. The bar under each is that reparto's
+                share of the flyer, so the weight is readable at a glance. */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {perReparto.map((rep) => {
+                const attivo = rep.reparto === repartoCorrente?.reparto;
+                const quota = maxArticoliReparto > 0 ? (rep.articoli / maxArticoliReparto) * 100 : 0;
+                return (
+                  <button
+                    key={rep.reparto}
+                    onClick={() => setRepartoAttivo(rep.reparto)}
+                    className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
+                      attivo
+                        ? 'bg-white border-dimar-red shadow-sm ring-1 ring-dimar-red/20'
+                        : 'bg-white/70 border-gray-200 hover:border-gray-300 hover:bg-white'
+                    }`}
+                  >
+                    <div className={`text-[11px] font-bold leading-tight truncate ${attivo ? 'text-dimar-red' : 'text-dimar-dark'}`}
+                      title={rep.reparto}>
+                      {rep.reparto}
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-lg font-bold tabular-nums text-dimar-dark">{rep.articoli}</span>
+                      <span className="text-[10px] text-gray-400">articoli</span>
+                    </div>
+                    <div className="h-1 bg-gray-100 rounded-full overflow-hidden mt-1.5">
+                      <div className={`h-full rounded-full ${attivo ? 'bg-dimar-red' : 'bg-gray-300'}`}
+                        style={{ width: `${quota}%` }} />
+                    </div>
+                    <div className="flex gap-2 mt-1.5 text-[10px]">
+                      <span className="text-violet-600">{rep.in_evidenza} evid.</span>
+                      <span className="text-emerald-600">{rep.in_zona_fornitore} zona</span>
+                      {rep.famiglie.length > 0 && (
+                        <span className="ml-auto text-gray-400">{rep.famiglie.length} fam.</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          ))}
-        </div>
+
+            {/* Detail: families of the selected reparto */}
+            {repartoCorrente && (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+                  <h4 className="text-sm font-bold text-dimar-dark">{repartoCorrente.reparto}</h4>
+                  <span className="text-[11px] text-gray-400">
+                    {repartoCorrente.famiglie.length} famiglie ECR
+                  </span>
+                  <span className="ml-auto text-[11px] text-gray-500">
+                    <strong className="text-dimar-red">{repartoCorrente.articoli}</strong> articoli ·
+                    <strong className="text-violet-600"> {repartoCorrente.in_evidenza}</strong> in evidenza ·
+                    <strong className="text-emerald-600"> {repartoCorrente.in_zona_fornitore}</strong> in zone fornitore
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-gray-400">
+                        <th className="text-left px-4 py-1.5 font-semibold">Famiglia ECR</th>
+                        <th className="text-right px-3 py-1.5 font-semibold">Articoli</th>
+                        <th className="text-right px-3 py-1.5 font-semibold">In evidenza</th>
+                        <th className="text-right px-3 py-1.5 font-semibold">In zona forn.</th>
+                        <th className="text-right px-4 py-1.5 font-semibold">Da rivedere</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repartoCorrente.famiglie.map((f, i) => (
+                        <tr key={i} className="border-b border-gray-50 hover:bg-red-50/20">
+                          <td className="px-4 py-1.5 text-gray-700">
+                            {f.famiglia || <span className="text-gray-300">non classificato</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">{f.articoli}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-violet-600">{f.in_evidenza}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{f.in_zona_fornitore}</td>
+                          <td className="px-4 py-1.5 text-right font-mono text-amber-600">{f.da_rivedere}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )
       )}
 
       {tab === 'zone' && (

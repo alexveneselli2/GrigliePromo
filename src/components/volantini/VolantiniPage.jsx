@@ -1,6 +1,20 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 const CANALI = ['Mercatò', 'Mercatò Local', 'Mercatò Big', 'Mercatò Extra'];
+// The phases the analysis reports, in the order they run.
+const FASI = {
+  estrazione: { breve: 'Lettura pagine', label: 'Lettura delle pagine con Claude' },
+  catalogo: { breve: 'Match catalogo', label: 'Confronto delle descrizioni col catalogo prodotti' },
+  classificazione: { breve: 'Classificazione', label: 'Classificazione AI degli articoli senza corrispondenza' },
+  salvataggio: { breve: 'Salvataggio', label: 'Salvataggio della catalogazione' },
+};
+const ORDINE_FASI = ['estrazione', 'catalogo', 'classificazione', 'salvataggio'];
+function statoFase(k, corrente) {
+  if (!corrente) return 'attesa';
+  const i = ORDINE_FASI.indexOf(k), c = ORDINE_FASI.indexOf(corrente);
+  return i < c ? 'fatta' : i === c ? 'corrente' : 'attesa';
+}
+
 const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
 
@@ -57,7 +71,7 @@ function StatoBadge({ stato }) {
 // Upload form
 // ---------------------------------------------------------------------------
 
-function UploadForm({ onDone, onError }) {
+function UploadForm({ onDone, onError, onRefresh }) {
   const now = new Date();
   const [file, setFile] = useState(null);
   const [nome, setNome] = useState('');
@@ -93,7 +107,14 @@ function UploadForm({ onDone, onError }) {
       if (inputRef.current) inputRef.current.value = '';
       onDone(data.volantino);
     } catch (err) {
-      onError(err.message);
+      // A big PDF on a small instance can have its response dropped by the
+      // proxy (502) even though the row was created and the analysis started.
+      // Say so instead of implying the upload failed.
+      const persa = /502|Failed to fetch|NetworkError|Load failed/i.test(err.message || '');
+      onError(persa
+        ? `La risposta del server si è persa (${err.message}). Il caricamento potrebbe essere comunque riuscito: controlla l'elenco qui a fianco prima di ripetere.`
+        : err.message);
+      onRefresh?.();
     } finally {
       setBusy(false);
     }
@@ -494,10 +515,44 @@ function Dettaglio({ id, onBack }) {
       </div>
 
       {v.stato === 'in_analisi' && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-center gap-3">
-          <div className="w-5 h-5 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin shrink-0" />
-          <div className="text-sm text-blue-900">
-            Analisi in corso sulle <strong>{v.pagine}</strong> pagine del volantino. La pagina si aggiorna da sola.
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin shrink-0" />
+            <div className="text-sm text-blue-900 flex-1">
+              {FASI[v.fase]?.label || 'Analisi in corso'} — <strong>{v.pagine}</strong> pagine.
+              La pagina si aggiorna da sola.
+            </div>
+            {v.progresso_totale > 0 && (
+              <span className="text-xs font-bold text-blue-700 tabular-nums shrink-0">
+                {v.progresso_fatto}/{v.progresso_totale}
+              </span>
+            )}
+          </div>
+
+          {/* Phase track: each step lights up as the run reaches it. */}
+          <div className="flex items-center gap-1.5 mt-3">
+            {ORDINE_FASI.map((k) => {
+              const stato = statoFase(k, v.fase);
+              return (
+                <div key={k} className="flex-1">
+                  <div className={`h-1.5 rounded-full overflow-hidden ${
+                    stato === 'fatta' ? 'bg-blue-600'
+                    : stato === 'corrente' ? 'bg-blue-200'
+                    : 'bg-blue-100'
+                  }`}>
+                    {stato === 'corrente' && v.progresso_totale > 0 && (
+                      <div className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, (v.progresso_fatto / v.progresso_totale) * 100)}%` }} />
+                    )}
+                  </div>
+                  <div className={`text-[9px] mt-1 uppercase tracking-wider font-semibold ${
+                    stato === 'corrente' ? 'text-blue-700' : 'text-blue-300'
+                  }`}>
+                    {FASI[k].breve}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -835,6 +890,7 @@ export default function VolantiniPage({ onClose }) {
             <UploadForm
               onDone={(v) => { setApertoId(v.id); carica(); }}
               onError={setErrore}
+              onRefresh={carica}
             />
             {errore && (
               <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800">

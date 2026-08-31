@@ -350,6 +350,22 @@ async function mapLimit(items, limit, fn) {
  * Analyse an uploaded flyer and persist the catalogue. Runs in the background;
  * progress is reflected in volantini.stato.
  */
+// Progress helpers. A full flyer takes minutes, so the run reports which phase
+// it is in and how far through it is; the UI polls the detail endpoint.
+async function fase(volantinoId, nome, totale) {
+  await query(
+    'UPDATE volantini SET fase = $1, progresso_fatto = 0, progresso_totale = $2 WHERE id = $3',
+    [nome, totale, volantinoId]
+  );
+}
+async function avanza(volantinoId) {
+  // Incremented from concurrent workers, so the increment happens in SQL.
+  await query(
+    'UPDATE volantini SET progresso_fatto = progresso_fatto + 1 WHERE id = $1',
+    [volantinoId]
+  );
+}
+
 export async function analizzaVolantino(volantinoId, pdfBuffer) {
   if (!client) throw new Error('ANTHROPIC_API_KEY non configurata sul server.');
 
@@ -363,10 +379,13 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
     chunks.push({ start, end });
   }
 
+  await fase(volantinoId, 'estrazione', chunks.length);
   const src = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const risultati = await mapLimit(chunks, CONCURRENCY, async ({ start, end }) => {
     const buf = await estraiChunk(src, start, end);
-    return analizzaChunk(buf, start, end - start);
+    const out = await analizzaChunk(buf, start, end - start);
+    await avanza(volantinoId);
+    return out;
   });
 
   const paginePiatte = risultati.flatMap((r) => r?.pagine || []);
@@ -379,6 +398,7 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
     }
   }
 
+  await fase(volantinoId, 'catalogo', tuttiArticoli.length);
   const classificati = await Promise.all(
     tuttiArticoli.map(async (a) => ({ art: a, cls: await matchCatalogo(a.descrizione) }))
   );
@@ -386,6 +406,7 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
   // 3 — the leftovers go to Claude
   const mancanti = classificati.filter((c) => !c.cls);
   if (mancanti.length > 0) {
+    await fase(volantinoId, 'classificazione', mancanti.length);
     const esiti = await classificaConAI(mancanti.map((m) => m.art.descrizione));
     for (const e of esiti) {
       const target = mancanti[e.indice];
@@ -403,6 +424,7 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
   }
 
   // 4 — persist
+  await fase(volantinoId, 'salvataggio', classificati.length);
   await withTransaction(async (c) => {
     // zones first, so articles can reference them
     const zonaIdByKey = new Map();
@@ -458,7 +480,9 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
     );
 
     await c.query(
-      `UPDATE volantini SET stato = 'completato', completato_il = now() WHERE id = $1`,
+      `UPDATE volantini SET stato = 'completato', completato_il = now(),
+              fase = NULL, progresso_fatto = 0, progresso_totale = 0
+        WHERE id = $1`,
       [volantinoId]
     );
   });
@@ -481,12 +505,14 @@ export async function riclassifica(volantinoId) {
   );
   if (r.rows.length === 0) return { aggiornati: 0, daRivedere: 0 };
 
+  await fase(volantinoId, 'catalogo', r.rows.length);
   const esiti = await Promise.all(
     r.rows.map(async (row) => ({ row, cls: await matchCatalogo(row.descrizione) }))
   );
 
   const mancanti = esiti.filter((e) => !e.cls);
   if (mancanti.length > 0 && client) {
+    await fase(volantinoId, 'classificazione', mancanti.length);
     const out = await classificaConAI(mancanti.map((m) => m.row.descrizione));
     for (const e of out) {
       const target = mancanti[e.indice];

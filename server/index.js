@@ -22,7 +22,14 @@ const PORT = process.env.PORT || 8787;
 const MODEL = process.env.AI_MODEL || 'claude-opus-4-8';
 // Extra cross-origin browsers allowed to call the proxy (besides same-origin,
 // which is always allowed). Same-origin works automatically — no config needed.
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
+// The defaults cover the two ways this app is served outside Render itself:
+// the Vite dev server and the GitHub Pages deploy. Override with ALLOWED_ORIGINS.
+const DEFAULT_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://alexveneselli2.github.io',
+].join(',');
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS)
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -175,7 +182,7 @@ async function planForPromo(promo, weights) {
     model: MODEL,
     max_tokens: 64000,
     // Extended (adaptive) thinking: lets the model reason through budget
-    // trade-offs and rotation before committing. Safe with streaming + 32k.
+    // trade-offs and rotation before committing. Safe with streaming + 64k.
     thinking: { type: 'adaptive' },
     // The system prompt is identical on every call, so we cache it: subsequent
     // promo requests reuse it instead of re-billing/re-processing the tokens.

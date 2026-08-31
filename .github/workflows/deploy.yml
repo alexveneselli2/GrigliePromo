@@ -25,10 +25,12 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          # Set this in repo Settings → Secrets and variables → Actions → Variables.
-          # e.g. https://grigliepromo-ai-proxy.onrender.com
-          # If empty, the app falls back to the local heuristic engine.
-          VITE_AI_PROXY_URL: ${{ vars.VITE_AI_PROXY_URL }}
+          # Where the AI proxy lives. Without this the Pages build has no proxy
+          # and the "AI (Claude)" toggle stays disabled (heuristic engine only).
+          # Defaults to the Render service; override in repo Settings →
+          # Secrets and variables → Actions → Variables if you move the proxy.
+          # The proxy allows this origin via ALLOWED_ORIGINS (see server/index.js).
+          VITE_AI_PROXY_URL: ${{ vars.VITE_AI_PROXY_URL || 'https://grigliepromo.onrender.com' }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

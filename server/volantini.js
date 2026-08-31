@@ -66,9 +66,24 @@ Ricevi alcune pagine di un volantino in PDF. Per OGNI pagina devi restituire:
 
 2. IN EVIDENZA — per ogni articolo indica se occupa uno spazio VISIBILMENTE PIU' GRANDE rispetto agli altri articoli della stessa pagina. I volantini hanno un taglio standard ripetuto (celle di dimensione simile); gli articoli "in evidenza" rompono quella griglia: box doppio o triplo, immagine grande, prezzo cubitale, posizione di apertura pagina. Confronta SEMPRE con gli altri articoli della stessa pagina: e' una valutazione relativa, non assoluta. Se in una pagina tutti gli articoli hanno la stessa dimensione, nessuno e' in evidenza.
 
-3. ZONE FORNITORE — aree della pagina la cui GRAFICA e' gestita dal fornitore e stacca visivamente dal layout del volantino: fondo colorato diverso, font e stile della marca, logo del produttore in evidenza, cornice dedicata, impaginazione propria. Sono i cosiddetti "spazi venduti al fornitore". Per ognuna indica il fornitore (se riconoscibile), come si distingue e quanti articoli contiene.
-   NON considerare zona fornitore i box istituzionali dell'insegna stessa (servizi, carta fedelta', spesa online, orari, concorsi dell'insegna): quelli appartengono al volantino, non a un fornitore esterno.
-   Se un articolo sta dentro una zona fornitore, valorizza il suo campo zonaFornitore con lo stesso nome della zona.
+3. ZONE FORNITORE — aree in cui e' il FORNITORE a fornire la grafica, comprata come spazio pubblicitario. Sono rare: in un volantino tipico se ne contano poche unita', non una per pagina.
+
+   Una zona fornitore si riconosce perche' porta un SISTEMA GRAFICO ESTRANEO al volantino:
+   - font e impaginazione propri della marca, diversi da quelli usati in tutto il resto del volantino;
+   - fotografia pubblicitaria del fornitore (testimonial, persone, ambientazioni, illustrazioni), non il semplice packshot del prodotto su fondo piatto;
+   - materiale di campagna: concorsi a premi, "vinci", regolamento, QR code, montepremi, claim del brand;
+   - palette di colori della marca, estranea a quella del volantino;
+   - una composizione interna propria, che di norma presenta PIU' prodotti disposti a modo suo.
+
+   ATTENZIONE — l'errore piu' frequente e' scambiare per zona fornitore il modo in cui IL VOLANTINO STESSO mette in risalto un articolo. Il volantino ha un suo trattamento di evidenza ricorrente (cornice colorata, fondo/diagonale a tinta, packshot ingrandito, prezzo cubitale, box che rompe la griglia): quello NON e' una zona fornitore, e' semplicemente un articolo in evidenza. Se vedi un box piu' grande con la cornice e i colori usati anche altrove nel volantino, e dentro c'e' UN SOLO prodotto col suo packshot e il suo prezzo, allora quell'articolo va marcato inEvidenza=true e il suo zonaFornitore va lasciato VUOTO.
+
+   Non sono zone fornitore nemmeno:
+   - i box istituzionali dell'insegna (servizi, spesa online, orari, carta fedelta', concorsi dell'insegna);
+   - i contenuti editoriali del volantino che parlano di una marca (schede prodotto, "abbinamento consigliato", riquadri della raccolta punti), riconoscibili perche' usano la grafica e i loghi dell'insegna.
+
+   Nel dubbio NON dichiarare la zona: e' preferibile perderne una che inventarne una che non esiste.
+
+   Per ogni zona indica il fornitore, come si distingue e quanti articoli contiene; e valorizza il campo zonaFornitore di ogni articolo che vi sta dentro con lo stesso nome della zona.
 
 Regole:
 - Non inventare articoli: riporta solo quelli effettivamente visibili.

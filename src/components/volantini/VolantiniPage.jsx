@@ -369,6 +369,11 @@ function Dettaglio({ id, onBack }) {
     carica();
   };
 
+  const eliminaZona = async (zonaId) => {
+    await readJson(await fetch(api(`/${id}/zone/${zonaId}`), { method: 'DELETE' }));
+    carica();
+  };
+
   const togliEvidenza = async (articoloId) => {
     await readJson(await fetch(api(`/${id}/articoli/${articoloId}`), {
       method: 'PATCH',
@@ -390,6 +395,7 @@ function Dettaglio({ id, onBack }) {
   };
 
   const [repartoAttivo, setRepartoAttivo] = useState(null);
+  const [raggruppa, setRaggruppa] = useState('famiglia'); // famiglia | reparto | pagina
 
   const perReparto = useMemo(() => {
     if (!data) return [];
@@ -414,18 +420,32 @@ function Dettaglio({ id, onBack }) {
   );
   const maxArticoliReparto = perReparto[0]?.articoli || 0;
 
-  // Highlighted articles grouped by ECR family, busiest family first — the
-  // question this tab answers is "which families got the big spaces".
-  const evidenzaPerFamiglia = useMemo(() => {
+  // Highlighted articles, grouped the way the user asked for. By famiglia or
+  // reparto the busiest group leads (which categories took the big spaces);
+  // by pagina the flyer's own order is kept, so it can be read alongside it.
+  const evidenzaRaggruppata = useMemo(() => {
     const map = new Map();
     for (const a of inEvidenza) {
-      const key = `${a.reparto || ''}||${a.famiglia || ''}`;
-      const cur = map.get(key) || { key, reparto: a.reparto, famiglia: a.famiglia, items: [] };
+      const key = raggruppa === 'pagina' ? `p${a.pagina}`
+        : raggruppa === 'reparto' ? (a.reparto || '')
+        : `${a.reparto || ''}||${a.famiglia || ''}`;
+      const cur = map.get(key) || {
+        key,
+        titolo: raggruppa === 'pagina' ? `Pagina ${a.pagina}`
+          : raggruppa === 'reparto' ? (a.reparto || 'senza reparto')
+          : (a.famiglia || 'non classificata'),
+        sopratitolo: raggruppa === 'famiglia' ? (a.reparto || 'senza reparto') : null,
+        pagina: a.pagina,
+        items: [],
+      };
       cur.items.push(a);
       map.set(key, cur);
     }
-    return [...map.values()].sort((a, b) => b.items.length - a.items.length);
-  }, [inEvidenza]);
+    const gruppi = [...map.values()];
+    return raggruppa === 'pagina'
+      ? gruppi.sort((a, b) => a.pagina - b.pagina)
+      : gruppi.sort((a, b) => b.items.length - a.items.length || a.titolo.localeCompare(b.titolo));
+  }, [inEvidenza, raggruppa]);
 
   if (errore) return (
     <div className="p-6">
@@ -608,22 +628,44 @@ function Dettaglio({ id, onBack }) {
       {tab === 'evidenza' && (
         <div className="space-y-3">
           <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 text-[11px] text-violet-900">
-            Articoli che occupano uno spazio più grande degli altri della stessa pagina, raggruppati
-            per famiglia ECR. Se uno non è davvero in evidenza, toglilo con "×".
+            Articoli che occupano uno spazio più grande degli altri della stessa pagina.
+            Se uno non è davvero in evidenza, toglilo con "×".
           </div>
+
+          {inEvidenza.length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Raggruppa per:</span>
+              <div className="inline-flex items-center bg-gray-100 rounded-lg p-0.5">
+                {[['famiglia', 'Famiglia'], ['reparto', 'Reparto'], ['pagina', 'Pagina']].map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setRaggruppa(k)}
+                    className={`px-2.5 py-0.5 text-[11px] font-semibold rounded ${
+                      raggruppa === k ? 'bg-white shadow-sm text-violet-700' : 'text-gray-500 hover:text-dimar-dark'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] text-gray-400 ml-1">
+                {evidenzaRaggruppata.length} gruppi · {inEvidenza.length} articoli
+              </span>
+            </div>
+          )}
 
           {inEvidenza.length === 0 ? (
             <p className="text-center text-sm text-gray-400 py-10">Nessun articolo in evidenza.</p>
           ) : (
-            evidenzaPerFamiglia.map((g) => (
+            evidenzaRaggruppata.map((g) => (
               <div key={g.key} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                 <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
-                    {g.reparto || 'senza reparto'}
-                  </span>
-                  <h4 className="text-xs font-bold text-dimar-dark">
-                    {g.famiglia || <span className="text-gray-300">non classificata</span>}
-                  </h4>
+                  {g.sopratitolo && (
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
+                      {g.sopratitolo}
+                    </span>
+                  )}
+                  <h4 className="text-xs font-bold text-dimar-dark">{g.titolo}</h4>
                   <span className="ml-auto px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold">
                     {g.items.length} in evidenza
                   </span>
@@ -634,6 +676,14 @@ function Dettaglio({ id, onBack }) {
                       <tr key={a.id} className="border-b border-gray-50 hover:bg-violet-50/30">
                         <td className="px-4 py-1.5 text-gray-400 tabular-nums w-12">p.{a.pagina}</td>
                         <td className="px-2 py-1.5 text-gray-800">{a.descrizione}</td>
+                        {/* The family is the group header when grouping by it;
+                            otherwise it still needs to be visible per row. */}
+                        {raggruppa !== 'famiglia' && (
+                          <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap max-w-[220px] truncate"
+                            title={`${a.reparto || ''} / ${a.famiglia || ''}`}>
+                            {a.famiglia || <span className="text-gray-300">non classificata</span>}
+                          </td>
+                        )}
                         <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{a.marca || ''}</td>
                         <td className="px-2 py-1.5 text-right font-mono text-dimar-red whitespace-nowrap">
                           {a.prezzo != null ? `€ ${Number(a.prezzo).toFixed(2).replace('.', ',')}` : ''}
@@ -676,15 +726,25 @@ function Dettaglio({ id, onBack }) {
                   <th className="text-left px-3 py-2 font-bold">Fornitore</th>
                   <th className="text-left px-3 py-2 font-bold">Come si distingue</th>
                   <th className="text-right px-4 py-2 font-bold">Articoli</th>
+                  <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
                 {data.zone.map((z) => (
-                  <tr key={z.id} className="border-b border-gray-50">
+                  <tr key={z.id} className="border-b border-gray-50 hover:bg-emerald-50/20">
                     <td className="px-4 py-2 tabular-nums text-gray-400">{z.pagina}</td>
                     <td className="px-3 py-2 font-semibold text-dimar-dark">{z.fornitore || '—'}</td>
                     <td className="px-3 py-2 text-gray-600">{z.descrizione}</td>
                     <td className="px-4 py-2 text-right font-mono font-bold">{z.articoli_collegati || z.n_articoli}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => eliminaZona(z.id)}
+                        title="Non è una zona fornitore: elimina (gli articoli restano)"
+                        className="text-gray-300 hover:text-red-500 font-bold"
+                      >
+                        ×
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

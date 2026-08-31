@@ -242,6 +242,20 @@ export default function volantiniRouter() {
     } catch (err) { next(err); }
   });
 
+  // ---- delete a supplier zone (false positive) ---------------------------
+  // The articles stay: only their zona_id is cleared (ON DELETE SET NULL), so
+  // removing a wrongly detected zone never removes products from the catalogue.
+  router.delete('/:id/zone/:zonaId', async (req, res, next) => {
+    try {
+      const r = await query(
+        'DELETE FROM volantino_zone WHERE id = $1 AND volantino_id = $2 RETURNING id',
+        [Number(req.params.zonaId), Number(req.params.id)]
+      );
+      if (r.rows.length === 0) return res.status(404).json({ error: 'Zona non trovata.' });
+      res.json({ ok: true });
+    } catch (err) { next(err); }
+  });
+
   // ---- delete ------------------------------------------------------------
   router.delete('/:id', async (req, res, next) => {
     try {

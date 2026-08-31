@@ -346,7 +346,7 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
       setStep('prepare');
       await new Promise(r => setTimeout(r, 200)); // let UI render
 
-      // Step 2: build payload with top-15 candidates
+      // Step 2: build payload with top-10 candidates
       setStep('payload');
       const currentSelections = gridState.allSelections[promoCode] || {};
       const payload = buildAIChannelPayload(channel, weights, 10, promoCode, currentSelections);
@@ -644,13 +644,17 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
 
                     {engine === 'ai' && !aiAvailable && (
                       <div className="mt-5 text-left bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
-                        <p className="font-bold mb-1">⚠️ Proxy AI non configurato</p>
+                        <p className="font-bold mb-2">⚠️ Proxy AI non configurato in questo ambiente</p>
+                        <p className="leading-relaxed mb-2">
+                          La API key non può stare nel browser, quindi il frontend deve sapere dove trovare
+                          il proxy. Questa build non ha quell'indirizzo. In locale crea un file
+                          {' '}<code className="bg-amber-100 px-1 rounded">.env.local</code> nella root del progetto:
+                        </p>
+                        <pre className="bg-amber-100 rounded p-2 mb-2 overflow-x-auto font-mono text-[11px]">VITE_AI_PROXY_URL=https://grigliepromo.onrender.com</pre>
                         <p className="leading-relaxed">
-                          Per usare Claude serve il backend proxy (la API key non può stare nel browser).
-                          Avvia <code className="bg-amber-100 px-1 rounded">server/</code> e imposta
-                          {' '}<code className="bg-amber-100 px-1 rounded">VITE_AI_PROXY_URL</code> nel file
-                          {' '}<code className="bg-amber-100 px-1 rounded">.env.local</code>. Vedi <code className="bg-amber-100 px-1 rounded">server/README.md</code>.
-                          Nel frattempo usa il motore euristico locale.
+                          Poi <strong>riavvia il dev server</strong> (<code className="bg-amber-100 px-1 rounded">npm run dev</code>):
+                          Vite legge le variabili solo all'avvio. In alternativa apri l'app direttamente su
+                          {' '}<code className="bg-amber-100 px-1 rounded">grigliepromo.onrender.com</code>, dove il proxy è già configurato.
                         </p>
                       </div>
                     )}
@@ -905,7 +909,7 @@ export default function AIPlanPanel({ channel, selectedPromoCode, gridState, aiS
                       <li><strong>Structured output</strong> (schema Zod) — la risposta è vincolata a un formato JSON preciso, validato automaticamente</li>
                       <li><strong>Streaming</strong> con heartbeat — evita timeout su risposte lunghe</li>
                       <li><strong>Prompt caching</strong> — il system prompt è riusato su più chiamate senza ri-elaborazione</li>
-                      <li><strong>max_tokens: 32.000</strong> — spazio abbondante per l'output</li>
+                      <li><strong>max_tokens: 64.000</strong> — spazio abbondante per thinking + output</li>
                     </ul>
                   </div>
                   <div>

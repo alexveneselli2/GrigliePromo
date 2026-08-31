@@ -104,12 +104,24 @@ export default function volantiniRouter() {
   router.get('/:id/articoli', async (req, res, next) => {
     try {
       const soloDaRivedere = req.query.daRivedere === '1';
+      const soloInEvidenza = req.query.inEvidenza === '1';
+      const filtri = [
+        soloDaRivedere ? 'AND a.da_rivedere' : '',
+        soloInEvidenza ? 'AND a.in_evidenza' : '',
+      ].join(' ');
+      // Highlighted articles read best grouped by category; the review queue
+      // reads best worst-first.
+      const ordine = soloDaRivedere
+        ? 'a.confidenza ASC NULLS FIRST, a.pagina'
+        : soloInEvidenza
+          ? 'a.reparto NULLS LAST, a.famiglia NULLS LAST, a.pagina'
+          : 'a.pagina, a.id';
       const r = await query(
         `SELECT a.*, z.fornitore AS zona_fornitore
            FROM volantino_articoli a
            LEFT JOIN volantino_zone z ON z.id = a.zona_id
-          WHERE a.volantino_id = $1 ${soloDaRivedere ? 'AND a.da_rivedere' : ''}
-          ORDER BY ${soloDaRivedere ? 'a.confidenza ASC NULLS FIRST, a.pagina' : 'a.pagina, a.id'}
+          WHERE a.volantino_id = $1 ${filtri}
+          ORDER BY ${ordine}
           LIMIT 2000`,
         [Number(req.params.id)]
       );

@@ -320,6 +320,7 @@ function ApprovaMassivo({ articoli, onApprova }) {
 function Dettaglio({ id, onBack }) {
   const [data, setData] = useState(null);
   const [daRivedere, setDaRivedere] = useState([]);
+  const [inEvidenza, setInEvidenza] = useState([]);
   const [errore, setErrore] = useState(null);
   const [tab, setTab] = useState('riepilogo');
   const [tassonomia, setTassonomia] = useState(null);
@@ -338,8 +339,12 @@ function Dettaglio({ id, onBack }) {
       const d = await readJson(await fetch(api(`/${id}`)));
       setData(d);
       if (d.volantino.stato === 'completato') {
-        const r = await readJson(await fetch(api(`/${id}/articoli?daRivedere=1`)));
-        setDaRivedere(r.articoli);
+        const [rev, ev] = await Promise.all([
+          readJson(await fetch(api(`/${id}/articoli?daRivedere=1`))),
+          readJson(await fetch(api(`/${id}/articoli?inEvidenza=1`))),
+        ]);
+        setDaRivedere(rev.articoli);
+        setInEvidenza(ev.articoli);
       }
     } catch (err) { setErrore(err.message); }
   }, [id]);
@@ -361,6 +366,16 @@ function Dettaglio({ id, onBack }) {
     }));
     const r = await readJson(await fetch(api(`/${id}/articoli?daRivedere=1`)));
     setDaRivedere(r.articoli);
+    carica();
+  };
+
+  const togliEvidenza = async (articoloId) => {
+    await readJson(await fetch(api(`/${id}/articoli/${articoloId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inEvidenza: false }),
+    }));
+    setInEvidenza((prev) => prev.filter((a) => a.id !== articoloId));
     carica();
   };
 
@@ -398,6 +413,19 @@ function Dettaglio({ id, onBack }) {
     [perReparto, repartoAttivo]
   );
   const maxArticoliReparto = perReparto[0]?.articoli || 0;
+
+  // Highlighted articles grouped by ECR family, busiest family first — the
+  // question this tab answers is "which families got the big spaces".
+  const evidenzaPerFamiglia = useMemo(() => {
+    const map = new Map();
+    for (const a of inEvidenza) {
+      const key = `${a.reparto || ''}||${a.famiglia || ''}`;
+      const cur = map.get(key) || { key, reparto: a.reparto, famiglia: a.famiglia, items: [] };
+      cur.items.push(a);
+      map.set(key, cur);
+    }
+    return [...map.values()].sort((a, b) => b.items.length - a.items.length);
+  }, [inEvidenza]);
 
   if (errore) return (
     <div className="p-6">
@@ -473,6 +501,7 @@ function Dettaglio({ id, onBack }) {
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {[
           ['riepilogo', 'Per reparto e famiglia'],
+          ['evidenza', `In evidenza (${t.in_evidenza})`],
           ['zone', `Zone fornitore (${data.zone.length})`],
           ['rivedere', `Da rivedere (${daRivedere.length})`],
         ].map(([k, label]) => (
@@ -574,6 +603,65 @@ function Dettaglio({ id, onBack }) {
             )}
           </div>
         )
+      )}
+
+      {tab === 'evidenza' && (
+        <div className="space-y-3">
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 text-[11px] text-violet-900">
+            Articoli che occupano uno spazio più grande degli altri della stessa pagina, raggruppati
+            per famiglia ECR. Se uno non è davvero in evidenza, toglilo con "×".
+          </div>
+
+          {inEvidenza.length === 0 ? (
+            <p className="text-center text-sm text-gray-400 py-10">Nessun articolo in evidenza.</p>
+          ) : (
+            evidenzaPerFamiglia.map((g) => (
+              <div key={g.key} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">
+                    {g.reparto || 'senza reparto'}
+                  </span>
+                  <h4 className="text-xs font-bold text-dimar-dark">
+                    {g.famiglia || <span className="text-gray-300">non classificata</span>}
+                  </h4>
+                  <span className="ml-auto px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold">
+                    {g.items.length} in evidenza
+                  </span>
+                </div>
+                <table className="w-full text-[11px]">
+                  <tbody>
+                    {g.items.map((a) => (
+                      <tr key={a.id} className="border-b border-gray-50 hover:bg-violet-50/30">
+                        <td className="px-4 py-1.5 text-gray-400 tabular-nums w-12">p.{a.pagina}</td>
+                        <td className="px-2 py-1.5 text-gray-800">{a.descrizione}</td>
+                        <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{a.marca || ''}</td>
+                        <td className="px-2 py-1.5 text-right font-mono text-dimar-red whitespace-nowrap">
+                          {a.prezzo != null ? `€ ${Number(a.prezzo).toFixed(2).replace('.', ',')}` : ''}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          {a.zona_fornitore && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
+                              {a.zona_fornitore}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right w-8">
+                          <button
+                            onClick={() => togliEvidenza(a.id)}
+                            title="Non è in evidenza"
+                            className="text-gray-300 hover:text-red-500 font-bold"
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          )}
+        </div>
       )}
 
       {tab === 'zone' && (

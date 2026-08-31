@@ -16,6 +16,8 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
+import { initSchema, hasDb } from './db.js';
+import volantiniRouter from './routes-volantini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8787;
@@ -60,7 +62,16 @@ app.use((req, res, next) => {
   })(req, res, next);
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, model: MODEL, ai: HAS_KEY }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  model: MODEL,
+  ai: HAS_KEY,
+  db: hasDb(),
+  volantini: hasDb() && HAS_KEY,
+}));
+
+// ---- Volantini (flyer cataloguing) ----
+app.use('/api/volantini', volantiniRouter());
 
 // ---- Structured-output schema returned by Claude (per promo) ----
 const ImpactSchema = z.object({
@@ -270,6 +281,22 @@ if (fs.existsSync(distDir)) {
   console.log('No ../dist found — running in API-only mode (run "npm run build" at repo root to serve the app too).');
 }
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT} (model: ${MODEL}, ai: ${HAS_KEY})`);
-});
+// Boot: prepare the DB schema and seed reference data, then start listening.
+// A DB failure must not take the whole app down — the promo grid works without
+// it; only the Volantini section becomes unavailable.
+async function boot() {
+  if (hasDb()) {
+    try {
+      await initSchema();
+      const { seedIfEmpty } = await import('./seed/load.js');
+      await seedIfEmpty();
+    } catch (err) {
+      console.error('[boot] inizializzazione database fallita:', err?.message || err);
+    }
+  }
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT} (model: ${MODEL}, ai: ${HAS_KEY}, db: ${hasDb()})`);
+  });
+}
+
+boot();

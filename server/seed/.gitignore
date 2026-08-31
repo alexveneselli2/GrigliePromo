@@ -1,0 +1,2 @@
+# Uncompressed seed CSVs are build artifacts — the .gz files are committed
+*.csv

@@ -67,6 +67,41 @@ function StatoBadge({ stato }) {
   );
 }
 
+// Downloads an .xlsx from the API. The browser needs a real object URL for
+// the blob, so the response is fetched rather than linked directly.
+async function scaricaXlsx(url, fallbackName) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `Errore ${res.status}`);
+  }
+  const blob = await res.blob();
+  const disp = res.headers.get('Content-Disposition') || '';
+  const nome = /filename="([^"]+)"/.exec(disp)?.[1] || fallbackName;
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(href);
+}
+
+function BottoneExport({ url, nome, etichetta = 'Esporta Excel', className = '' }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      onClick={async () => { setBusy(true); try { await scaricaXlsx(url, nome); } finally { setBusy(false); } }}
+      disabled={busy}
+      title="Scarica questa lista in formato Excel"
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 ${className}`}
+    >
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+      </svg>
+      {busy ? 'Preparo…' : etichetta}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Upload form
 // ---------------------------------------------------------------------------
@@ -216,6 +251,87 @@ function UploadForm({ onDone, onError, onRefresh }) {
         L'analisi prosegue in background: puoi chiudere e tornare più tardi.
       </p>
     </form>
+  );
+}
+
+function FormModifica({ v, onSalva, onAnnulla }) {
+  const [nome, setNome] = useState(v.nome || '');
+  const [canali, setCanali] = useState(v.canali || []);
+  const [mese, setMese] = useState(v.mese);
+  const [anno, setAnno] = useState(v.anno);
+  const [progressivo, setProgressivo] = useState(v.progressivo);
+  const [nota, setNota] = useState(v.nota || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const toggle = (c) => setCanali((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+  const valido = nome.trim() && canali.length > 0;
+
+  const salva = async () => {
+    if (!valido) return;
+    setBusy(true); setErr(null);
+    try {
+      await onSalva({ nome: nome.trim(), canali, mese, anno, progressivo, nota });
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 space-y-3">
+      <h3 className="text-sm font-bold text-dimar-dark">Modifica dati del volantino</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="sm:col-span-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Nome *</label>
+          <input value={nome} onChange={(e) => setNome(e.target.value)}
+            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Canali *</label>
+          <div className="flex flex-wrap gap-1.5">
+            {CANALI.map((c) => (
+              <button key={c} type="button" onClick={() => toggle(c)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  canali.includes(c) ? 'bg-dimar-red text-white border-dimar-red'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Periodo *</label>
+          <div className="flex gap-2">
+            <select value={mese} onChange={(e) => setMese(Number(e.target.value))}
+              className="flex-1 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white">
+              {MESI.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+            <input type="number" value={anno} onChange={(e) => setAnno(Number(e.target.value))}
+              className="w-24 text-sm border border-gray-300 rounded-lg px-2 py-2" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Progressivo *</label>
+          <input type="number" value={progressivo} onChange={(e) => setProgressivo(Number(e.target.value))}
+            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Nota</label>
+          <textarea value={nota} onChange={(e) => setNota(e.target.value)} rows={2}
+            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 resize-none" />
+        </div>
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={!valido || busy}
+          className="px-4 py-2 text-xs font-bold rounded-lg bg-dimar-red text-white hover:bg-dimar-red-dark disabled:opacity-40">
+          {busy ? 'Salvo…' : 'Salva'}
+        </button>
+        <button onClick={onAnnulla} disabled={busy}
+          className="px-4 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">
+          Annulla
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -391,6 +507,17 @@ function Dettaglio({ id, onBack }) {
   };
 
   const [azione, setAzione] = useState(null); // 'rianalizza' | 'file' | 'volantino'
+  const [modifica, setModifica] = useState(false);
+
+  const salvaModifica = async (patch) => {
+    await readJson(await fetch(api(`/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }));
+    setModifica(false);
+    carica();
+  };
 
   const rianalizza = async () => {
     setAzione('rianalizza');
@@ -545,8 +672,18 @@ function Dettaglio({ id, onBack }) {
         </div>
       </div>
 
+      {modifica && (
+        <FormModifica v={v} onSalva={salvaModifica} onAnnulla={() => setModifica(false)} />
+      )}
+
       {/* Azioni sul volantino */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <button
+          onClick={() => setModifica((m) => !m)}
+          className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+        >
+          {modifica ? 'Chiudi modifica' : 'Modifica dati'}
+        </button>
         {v.ha_file ? (
           <>
             <button
@@ -569,6 +706,8 @@ function Dettaglio({ id, onBack }) {
             PDF non conservato: per rianalizzare occorre ricaricare il file.
           </span>
         )}
+        <BottoneExport url={api(`/${id}/export?tipo=articoli`)} nome="articoli.xlsx"
+          etichetta="Esporta tutti gli articoli" />
         <button
           onClick={eliminaVolantino}
           disabled={!!azione}
@@ -660,6 +799,9 @@ function Dettaglio({ id, onBack }) {
           <div className="space-y-4">
             {/* Master: one card per reparto. The bar under each is that reparto's
                 share of the flyer, so the weight is readable at a glance. */}
+            <div className="flex justify-end">
+              <BottoneExport url={api(`/${id}/export?tipo=famiglie`)} nome="reparti-famiglie.xlsx" />
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
               {perReparto.map((rep) => {
                 const attivo = rep.reparto === repartoCorrente?.reparto;
@@ -770,6 +912,7 @@ function Dettaglio({ id, onBack }) {
               <span className="text-[10px] text-gray-400 ml-1">
                 {evidenzaRaggruppata.length} gruppi · {inEvidenza.length} articoli
               </span>
+              <BottoneExport url={api(`/${id}/export?tipo=evidenza`)} nome="in-evidenza.xlsx" className="ml-auto" />
             </div>
           )}
 
@@ -834,6 +977,10 @@ function Dettaglio({ id, onBack }) {
       )}
 
       {tab === 'zone' && (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <BottoneExport url={api(`/${id}/export?tipo=zone`)} nome="zone-fornitore.xlsx" />
+          </div>
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           {data.zone.length === 0 ? (
             <p className="text-center text-sm text-gray-400 py-10">Nessuna zona fornitore rilevata.</p>
@@ -870,13 +1017,17 @@ function Dettaglio({ id, onBack }) {
             </table>
           )}
         </div>
+        </div>
       )}
 
       {tab === 'rivedere' && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-100 text-[11px] text-amber-900">
-            Questi articoli non hanno trovato una corrispondenza sicura nel catalogo: la classificazione
-            è stata dedotta. Correggi dove serve e conferma.
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-100 text-[11px] text-amber-900 flex items-center gap-3">
+            <span className="flex-1">
+              Questi articoli non hanno trovato una corrispondenza sicura nel catalogo: la classificazione
+              è stata dedotta. Correggi dove serve e conferma.
+            </span>
+            <BottoneExport url={api(`/${id}/export?tipo=rivedere`)} nome="da-rivedere.xlsx" />
           </div>
           {daRivedere.length > 0 && (
             <ApprovaMassivo articoli={daRivedere} onApprova={approvaMassivo} />
@@ -964,7 +1115,12 @@ export default function VolantiniPage({ onClose }) {
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-dimar-dark mb-3">Volantini caricati</h3>
+            <div className="flex items-center gap-2 mb-3">
+              <h3 className="text-sm font-bold text-dimar-dark">Volantini caricati</h3>
+              {lista?.length > 0 && (
+                <BottoneExport url={api('/export')} nome="volantini.xlsx" className="ml-auto" />
+              )}
+            </div>
             {lista === null && <p className="text-sm text-gray-400">Caricamento…</p>}
             {lista?.length === 0 && !errore && (
               <p className="text-sm text-gray-400 py-10 text-center border border-dashed border-gray-200 rounded-xl">

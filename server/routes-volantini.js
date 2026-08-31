@@ -8,6 +8,16 @@ import express from 'express';
 import multer from 'multer';
 import { query, hasDb } from './db.js';
 import { analizzaVolantino, riepilogo, contaPagine, riclassifica } from './volantini.js';
+import { esportaLista, esportaVolantini, TIPI_EXPORT } from './export-xlsx.js';
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+function inviaXlsx(res, { buffer, filename }) {
+  res.setHeader('Content-Type', XLSX_MIME);
+  // The name is ASCII-safe by construction (slugified), so a plain filename
+  // is enough and avoids the RFC 5987 encoding dance.
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(Buffer.from(buffer));
+}
 
 // Every column of `volantini` EXCEPT file_dati, which holds the raw PDF and
 // must never be dragged into list/detail responses.
@@ -51,6 +61,69 @@ export default function volantiniRouter() {
           ORDER BY v.anno DESC, v.mese DESC, v.progressivo DESC, v.id DESC`
       );
       res.json({ volantini: r.rows });
+    } catch (err) { next(err); }
+  });
+
+  // ---- Excel exports -----------------------------------------------------
+  // Declared before '/:id' so "export" isn't parsed as an id.
+  router.get('/export', async (_req, res, next) => {
+    try { inviaXlsx(res, await esportaVolantini()); } catch (err) { next(err); }
+  });
+
+  router.get('/:id/export', async (req, res, next) => {
+    try {
+      const tipo = String(req.query.tipo || 'articoli');
+      if (!TIPI_EXPORT.includes(tipo)) {
+        return res.status(400).json({ error: `Tipo non valido. Ammessi: ${TIPI_EXPORT.join(', ')}.` });
+      }
+      const out = await esportaLista(Number(req.params.id), tipo);
+      if (!out) return res.status(404).json({ error: 'Volantino non trovato.' });
+      inviaXlsx(res, out);
+    } catch (err) { next(err); }
+  });
+
+  // ---- edit the flyer's own attributes -----------------------------------
+  router.patch('/:id', async (req, res, next) => {
+    try {
+      const { nome, canali, mese, anno, progressivo, nota } = req.body || {};
+      const errori = [];
+      if (nome !== undefined && !String(nome).trim()) errori.push('nome');
+      if (mese !== undefined && !(Number(mese) >= 1 && Number(mese) <= 12)) errori.push('mese');
+      if (anno !== undefined && !(Number(anno) >= 2000 && Number(anno) <= 2100)) errori.push('anno');
+      if (progressivo !== undefined && !Number.isInteger(Number(progressivo))) errori.push('progressivo');
+      if (canali !== undefined) {
+        if (!Array.isArray(canali) || canali.length === 0) errori.push('canali');
+        else {
+          const nv = canali.filter((c) => !CANALI_VALIDI.includes(c));
+          if (nv.length) errori.push(`canali non validi: ${nv.join(', ')}`);
+        }
+      }
+      if (errori.length) {
+        return res.status(400).json({ error: `Campi non validi: ${errori.join(', ')}` });
+      }
+
+      // COALESCE keeps every field the caller didn't send.
+      const r = await query(
+        `UPDATE volantini
+            SET nome        = COALESCE($1, nome),
+                canali      = COALESCE($2, canali),
+                mese        = COALESCE($3, mese),
+                anno        = COALESCE($4, anno),
+                progressivo = COALESCE($5, progressivo),
+                nota        = COALESCE($6, nota)
+          WHERE id = $7
+          RETURNING ${COLONNE_VOLANTINO}`,
+        [
+          nome !== undefined ? String(nome).trim() : null,
+          canali !== undefined ? canali : null,
+          mese !== undefined ? Number(mese) : null,
+          anno !== undefined ? Number(anno) : null,
+          progressivo !== undefined ? Number(progressivo) : null,
+          nota !== undefined ? String(nota) : null,
+        ].concat([Number(req.params.id)])
+      );
+      if (r.rows.length === 0) return res.status(404).json({ error: 'Volantino non trovato.' });
+      res.json({ volantino: r.rows[0] });
     } catch (err) { next(err); }
   });
 

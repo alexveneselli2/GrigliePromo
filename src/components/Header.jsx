@@ -17,6 +17,7 @@ export default function Header({
   onViewChange,
   onOpenAI,
   onOpenBuyer,
+  onOpenVolantini,
   onSave,
   onSendData,
   lastSavedAt,
@@ -114,6 +115,20 @@ export default function Header({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
               </svg>
               Buyer
+            </button>
+          )}
+
+          {/* Volantini — PDF flyer cataloguing */}
+          {onOpenVolantini && (
+            <button
+              onClick={onOpenVolantini}
+              title="Carica e cataloga un volantino PDF"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-slate-700 to-slate-500 text-white text-xs font-semibold shadow-sm hover:shadow-md transition-all"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              Volantini
             </button>
           )}
 

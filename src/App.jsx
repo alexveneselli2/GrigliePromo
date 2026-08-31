@@ -4,6 +4,7 @@ import Header from './components/Header';
 import V2View from './components/v2/V2View';
 import AIPlanPanel from './components/ai/AIPlanPanel';
 import BuyerPanel from './components/buyer/BuyerPanel';
+import VolantiniPage from './components/volantini/VolantiniPage';
 import V1View from './components/v1/V1View';
 import useGridState from './hooks/useGridState';
 import useAIState from './hooks/useAIState';
@@ -22,6 +23,7 @@ export default function App() {
   const [view, setView] = useState('v2');
   const [aiOpen, setAIOpen] = useState(false);
   const [buyerOpen, setBuyerOpen] = useState(false);
+  const [volantiniOpen, setVolantiniOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [lastSentAt, setLastSentAt] = useState(INITIAL_LAST_SENT);
   const [saving, setSaving] = useState(false);
@@ -81,6 +83,7 @@ export default function App() {
         onViewChange={setView}
         onOpenAI={() => setAIOpen(true)}
         onOpenBuyer={() => setBuyerOpen(true)}
+        onOpenVolantini={() => setVolantiniOpen(true)}
         onSave={handleSave}
         onSendData={handleSendData}
         lastSavedAt={lastSavedAt}
@@ -109,6 +112,8 @@ export default function App() {
       )}
 
       {buyerOpen && <BuyerPanel onClose={() => setBuyerOpen(false)} />}
+
+      {volantiniOpen && <VolantiniPage onClose={() => setVolantiniOpen(false)} />}
     </div>
   );
 }

@@ -63,7 +63,9 @@ Ricevi alcune pagine di un volantino in PDF. Per OGNI pagina devi restituire:
 
 2. IN EVIDENZA — per ogni articolo indica se occupa uno spazio VISIBILMENTE PIU' GRANDE rispetto agli altri articoli della stessa pagina. I volantini hanno un taglio standard ripetuto (celle di dimensione simile); gli articoli "in evidenza" rompono quella griglia: box doppio o triplo, immagine grande, prezzo cubitale, posizione di apertura pagina. Confronta SEMPRE con gli altri articoli della stessa pagina: e' una valutazione relativa, non assoluta. Se in una pagina tutti gli articoli hanno la stessa dimensione, nessuno e' in evidenza.
 
-3. ZONE FORNITORE — aree della pagina la cui GRAFICA e' gestita dal fornitore e stacca visivamente dal layout del volantino: fondo colorato diverso, font e stile della marca, logo del produttore in evidenza, cornice dedicata, impaginazione propria. Sono i cosiddetti "spazi venduti al fornitore". Per ognuna indica il fornitore (se riconoscibile), come si distingue e quanti articoli contiene. Se un articolo sta dentro una di queste zone, valorizza il suo campo zonaFornitore con lo stesso nome della zona.
+3. ZONE FORNITORE — aree della pagina la cui GRAFICA e' gestita dal fornitore e stacca visivamente dal layout del volantino: fondo colorato diverso, font e stile della marca, logo del produttore in evidenza, cornice dedicata, impaginazione propria. Sono i cosiddetti "spazi venduti al fornitore". Per ognuna indica il fornitore (se riconoscibile), come si distingue e quanti articoli contiene.
+   NON considerare zona fornitore i box istituzionali dell'insegna stessa (servizi, carta fedelta', spesa online, orari, concorsi dell'insegna): quelli appartengono al volantino, non a un fornitore esterno.
+   Se un articolo sta dentro una zona fornitore, valorizza il suo campo zonaFornitore con lo stesso nome della zona.
 
 Regole:
 - Non inventare articoli: riporta solo quelli effettivamente visibili.
@@ -151,8 +153,13 @@ export function normalizza(s) {
 const FAMIGLIE_TECNICHE = /ESAURIT|NON CLASS|CAUZION|BATTUTE REP|BUONI SCONTO|DA DEFINIRE|VARIE ?$/i;
 
 // Similarity tiers, tuned against real flyer-style descriptions.
-const SIM_SICURA = 0.75;  // accept as-is
-const SIM_MINIMA = 0.50;  // accept but ask the user to confirm
+// Measured on a real 26-page flyer (377 articles): flyer copy is much longer
+// than the internal product master ("PESTO FRESCO BIFFI gr.90 vari tipi" vs
+// "PESTO BIFFI GR.90"), and trigram similarity punishes that length gap rather
+// than any real error. At 0.75 only ~11% of correct matches passed; spot checks
+// showed matches down to ~0.60 are reliable.
+const SIM_SICURA = 0.60;  // accept as-is
+const SIM_MINIMA = 0.45;  // accept but ask the user to confirm
 
 async function matchCatalogo(descrizione) {
   const norm = normalizza(descrizione);
@@ -406,6 +413,59 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
   });
 
   return { pagine, articoli: classificati.length };
+}
+
+/**
+ * Re-run only the classification step on articles already extracted from the
+ * PDF. Cheap compared to a full re-analysis (no vision pass), so tuning the
+ * matching thresholds doesn't mean paying to read the flyer again.
+ * Manually corrected rows are left untouched.
+ */
+export async function riclassifica(volantinoId) {
+  const r = await query(
+    `SELECT id, descrizione FROM volantino_articoli
+      WHERE volantino_id = $1 AND origine <> 'manuale'
+      ORDER BY id`,
+    [volantinoId]
+  );
+  if (r.rows.length === 0) return { aggiornati: 0, daRivedere: 0 };
+
+  const esiti = await Promise.all(
+    r.rows.map(async (row) => ({ row, cls: await matchCatalogo(row.descrizione) }))
+  );
+
+  const mancanti = esiti.filter((e) => !e.cls);
+  if (mancanti.length > 0 && client) {
+    const out = await classificaConAI(mancanti.map((m) => m.row.descrizione));
+    for (const e of out) {
+      const target = mancanti[e.indice];
+      if (!target) continue;
+      target.cls = {
+        reparto: e.reparto, gruppo: null, settore: null, famiglia: e.famiglia,
+        origine: 'ai', confidenza: e.confidenza, daRivedere: true,
+      };
+    }
+  }
+
+  let daRivedere = 0;
+  await withTransaction(async (c) => {
+    for (const { row, cls } of esiti) {
+      const rivedi = cls ? cls.daRivedere !== false : true;
+      if (rivedi) daRivedere++;
+      await c.query(
+        `UPDATE volantino_articoli
+            SET reparto = $1, gruppo = $2, settore = $3, famiglia = $4,
+                origine = $5, confidenza = $6, da_rivedere = $7
+          WHERE id = $8`,
+        [
+          cls?.reparto || null, cls?.gruppo || null, cls?.settore || null, cls?.famiglia || null,
+          cls?.origine || 'ai', cls?.confidenza ?? null, rivedi, row.id,
+        ]
+      );
+    }
+  });
+
+  return { aggiornati: esiti.length, daRivedere };
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 import express from 'express';
 import multer from 'multer';
 import { query, hasDb } from './db.js';
-import { analizzaVolantino, riepilogo, contaPagine } from './volantini.js';
+import { analizzaVolantino, riepilogo, contaPagine, riclassifica } from './volantini.js';
 
 const CANALI_VALIDI = ['Mercatò', 'Mercatò Local', 'Mercatò Big', 'Mercatò Extra'];
 
@@ -65,7 +65,7 @@ export default function volantiniRouter() {
            FROM volantino_articoli a
            LEFT JOIN volantino_zone z ON z.id = a.zona_id
           WHERE a.volantino_id = $1 ${soloDaRivedere ? 'AND a.da_rivedere' : ''}
-          ORDER BY a.pagina, a.id
+          ORDER BY ${soloDaRivedere ? 'a.confidenza ASC NULLS FIRST, a.pagina' : 'a.pagina, a.id'}
           LIMIT 2000`,
         [Number(req.params.id)]
       );
@@ -155,6 +155,14 @@ export default function volantiniRouter() {
               [String(err?.message || err).slice(0, 500), volantino.id]);
           } catch { /* best effort */ }
         });
+    } catch (err) { next(err); }
+  });
+
+  // ---- re-run classification only (no vision pass, so cheap) --------------
+  router.post('/:id/riclassifica', async (req, res, next) => {
+    try {
+      const out = await riclassifica(Number(req.params.id));
+      res.json(out);
     } catch (err) { next(err); }
   });
 

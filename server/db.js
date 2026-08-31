@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS catalogo_prodotti (
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS fase TEXT;
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS progresso_fatto INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS progresso_totale INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE volantini ADD COLUMN IF NOT EXISTS aggiornato_il TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_cat_norm ON catalogo_prodotti(descrizione_norm);
 CREATE INDEX IF NOT EXISTS idx_albero_cod ON ecr_albero(cod_famiglia);

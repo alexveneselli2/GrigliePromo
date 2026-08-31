@@ -354,14 +354,16 @@ async function mapLimit(items, limit, fn) {
 // it is in and how far through it is; the UI polls the detail endpoint.
 async function fase(volantinoId, nome, totale) {
   await query(
-    'UPDATE volantini SET fase = $1, progresso_fatto = 0, progresso_totale = $2 WHERE id = $3',
+    `UPDATE volantini SET fase = $1, progresso_fatto = 0, progresso_totale = $2,
+            aggiornato_il = now() WHERE id = $3`,
     [nome, totale, volantinoId]
   );
 }
 async function avanza(volantinoId) {
   // Incremented from concurrent workers, so the increment happens in SQL.
   await query(
-    'UPDATE volantini SET progresso_fatto = progresso_fatto + 1 WHERE id = $1',
+    `UPDATE volantini SET progresso_fatto = progresso_fatto + 1,
+            aggiornato_il = now() WHERE id = $1`,
     [volantinoId]
   );
 }

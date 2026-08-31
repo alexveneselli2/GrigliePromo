@@ -288,6 +288,23 @@ async function boot() {
   if (hasDb()) {
     try {
       await initSchema();
+
+      // The analysis runs in this process, so a restart (deploy, crash, Render
+      // recycling the instance) always kills any run in flight. Without this
+      // the row stays 'in_analisi' forever and the UI spins on nothing.
+      const { query } = await import('./db.js');
+      const orfani = await query(
+        `UPDATE volantini
+            SET stato = 'errore',
+                errore = 'Analisi interrotta dal riavvio del server. Ricarica il volantino per rianalizzarlo.',
+                fase = NULL, progresso_fatto = 0, progresso_totale = 0
+          WHERE stato = 'in_analisi'
+        RETURNING id`
+      );
+      if (orfani.rows.length > 0) {
+        console.warn(`[boot] ${orfani.rows.length} analisi interrotte da un riavvio, marcate come errore: ${orfani.rows.map(r => r.id).join(', ')}`);
+      }
+
       const { seedIfEmpty } = await import('./seed/load.js');
       await seedIfEmpty();
     } catch (err) {

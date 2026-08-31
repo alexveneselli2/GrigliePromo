@@ -149,6 +149,11 @@ ALTER TABLE volantini ADD COLUMN IF NOT EXISTS progresso_fatto INTEGER NOT NULL 
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS progresso_totale INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS aggiornato_il TIMESTAMPTZ;
 
+-- The uploaded PDF, kept so an analysis can be re-run without re-uploading.
+-- NEVER select this with *: it is tens of MB per flyer. Use COLONNE_VOLANTINO
+-- in routes-volantini.js, which lists every column except this one.
+ALTER TABLE volantini ADD COLUMN IF NOT EXISTS file_dati BYTEA;
+
 CREATE INDEX IF NOT EXISTS idx_cat_norm ON catalogo_prodotti(descrizione_norm);
 CREATE INDEX IF NOT EXISTS idx_albero_cod ON ecr_albero(cod_famiglia);
 CREATE INDEX IF NOT EXISTS idx_albero_rep ON ecr_albero(reparto);

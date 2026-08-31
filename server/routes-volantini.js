@@ -9,6 +9,13 @@ import multer from 'multer';
 import { query, hasDb } from './db.js';
 import { analizzaVolantino, riepilogo, contaPagine, riclassifica } from './volantini.js';
 
+// Every column of `volantini` EXCEPT file_dati, which holds the raw PDF and
+// must never be dragged into list/detail responses.
+const COLONNE_VOLANTINO = `id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
+   pagine, stato, errore, modello, creato_il, completato_il,
+   fase, progresso_fatto, progresso_totale, aggiornato_il,
+   (file_dati IS NOT NULL) AS ha_file`;
+
 const CANALI_VALIDI = ['Mercatò', 'Mercatò Local', 'Mercatò Big', 'Mercatò Extra'];
 
 const upload = multer({
@@ -37,7 +44,7 @@ export default function volantiniRouter() {
   router.get('/', async (_req, res, next) => {
     try {
       const r = await query(
-        `SELECT v.*,
+        `SELECT ${COLONNE_VOLANTINO.replace(/\bid\b/, 'v.id')},
                 (SELECT COUNT(*) FROM volantino_articoli a WHERE a.volantino_id = v.id) AS n_articoli,
                 (SELECT COUNT(*) FROM volantino_articoli a WHERE a.volantino_id = v.id AND a.da_rivedere) AS n_da_rivedere
            FROM volantini v
@@ -189,11 +196,14 @@ export default function volantiniRouter() {
       }
 
       const ins = await query(
-        `INSERT INTO volantini (nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes, pagine, stato)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_analisi') RETURNING *`,
+        `INSERT INTO volantini (nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes, pagine, stato, file_dati)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_analisi',$10)
+         RETURNING ${COLONNE_VOLANTINO}`,
         [
           String(nome).trim(), canali, Number(mese), Number(anno), Number(progressivo),
           nota ? String(nota) : '', req.file.originalname, req.file.size, pagine,
+          // Kept so the analysis can be re-run without re-uploading.
+          req.file.buffer,
         ]
       );
       const volantino = ins.rows[0];
@@ -239,6 +249,54 @@ export default function volantiniRouter() {
               [String(err?.message || err).slice(0, 500), id]);
           } catch { /* best effort */ }
         });
+    } catch (err) { next(err); }
+  });
+
+  // ---- re-run the full analysis from the stored PDF ----------------------
+  router.post('/:id/rianalizza', async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      const r = await query('SELECT file_dati, stato FROM volantini WHERE id = $1', [id]);
+      if (r.rows.length === 0) return res.status(404).json({ error: 'Volantino non trovato.' });
+      if (!r.rows[0].file_dati) {
+        return res.status(409).json({ error: 'Il PDF non è più disponibile: ricarica il volantino per rianalizzarlo.' });
+      }
+      if (r.rows[0].stato === 'in_analisi') {
+        return res.status(409).json({ error: 'Un\'analisi è già in corso su questo volantino.' });
+      }
+      const pdf = r.rows[0].file_dati;
+
+      // Start from a clean slate: the previous run's articles and zones go.
+      await query('DELETE FROM volantino_articoli WHERE volantino_id = $1', [id]);
+      await query('DELETE FROM volantino_zone WHERE volantino_id = $1', [id]);
+      await query(
+        `UPDATE volantini SET stato = 'in_analisi', errore = NULL, completato_il = NULL,
+                fase = NULL, progresso_fatto = 0, progresso_totale = 0
+          WHERE id = $1`, [id]
+      );
+      res.status(202).json({ avviata: true });
+
+      analizzaVolantino(id, pdf)
+        .then((out) => console.log(`[volantini] #${id} rianalizzato: ${out.pagine} pagine, ${out.articoli} articoli`))
+        .catch(async (err) => {
+          console.error(`[volantini] #${id} rianalisi fallita:`, err?.message || err);
+          try {
+            await query(`UPDATE volantini SET stato = 'errore', errore = $1 WHERE id = $2`,
+              [String(err?.message || err).slice(0, 500), id]);
+          } catch { /* best effort */ }
+        });
+    } catch (err) { next(err); }
+  });
+
+  // ---- drop just the stored PDF, keeping the catalogue -------------------
+  router.delete('/:id/file', async (req, res, next) => {
+    try {
+      const r = await query(
+        'UPDATE volantini SET file_dati = NULL WHERE id = $1 RETURNING id',
+        [Number(req.params.id)]
+      );
+      if (r.rows.length === 0) return res.status(404).json({ error: 'Volantino non trovato.' });
+      res.json({ ok: true });
     } catch (err) { next(err); }
   });
 

@@ -553,7 +553,10 @@ export async function riclassifica(volantinoId) {
 
 export async function riepilogo(volantinoId) {
   const [testata, perFamiglia, zone, totali] = await Promise.all([
-    query('SELECT * FROM volantini WHERE id = $1', [volantinoId]),
+    query(`SELECT id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
+   pagine, stato, errore, modello, creato_il, completato_il,
+   fase, progresso_fatto, progresso_totale, aggiornato_il,
+   (file_dati IS NOT NULL) AS ha_file FROM volantini WHERE id = $1`, [volantinoId]),
     query(
       `SELECT reparto, famiglia,
               COUNT(*)                                    AS articoli,

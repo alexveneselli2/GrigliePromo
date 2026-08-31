@@ -390,6 +390,37 @@ function Dettaglio({ id, onBack }) {
     carica();
   };
 
+  const [azione, setAzione] = useState(null); // 'rianalizza' | 'file' | 'volantino'
+
+  const rianalizza = async () => {
+    setAzione('rianalizza');
+    try {
+      await readJson(await fetch(api(`/${id}/rianalizza`), { method: 'POST' }));
+      setDaRivedere([]); setInEvidenza([]);
+      carica();
+    } catch (err) { setErrore(err.message); }
+    finally { setAzione(null); }
+  };
+
+  const eliminaFile = async () => {
+    if (!window.confirm('Elimino il PDF salvato? La catalogazione resta, ma non potrai più rianalizzare senza ricaricare il file.')) return;
+    setAzione('file');
+    try {
+      await readJson(await fetch(api(`/${id}/file`), { method: 'DELETE' }));
+      carica();
+    } catch (err) { setErrore(err.message); }
+    finally { setAzione(null); }
+  };
+
+  const eliminaVolantino = async () => {
+    if (!window.confirm('Elimino definitivamente questo volantino e tutta la sua catalogazione? L\'operazione non è reversibile.')) return;
+    setAzione('volantino');
+    try {
+      await readJson(await fetch(api(`/${id}`), { method: 'DELETE' }));
+      onBack();
+    } catch (err) { setErrore(err.message); setAzione(null); }
+  };
+
   const eliminaZona = async (zonaId) => {
     await readJson(await fetch(api(`/${id}/zone/${zonaId}`), { method: 'DELETE' }));
     carica();
@@ -512,6 +543,39 @@ function Dettaglio({ id, onBack }) {
           <span><span className="text-gray-400">Modello:</span> <strong>{v.modello || '—'}</strong></span>
           {v.nota && <span className="text-gray-500 italic">"{v.nota}"</span>}
         </div>
+      </div>
+
+      {/* Azioni sul volantino */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {v.ha_file ? (
+          <>
+            <button
+              onClick={rianalizza}
+              disabled={!!azione || v.stato === 'in_analisi'}
+              className="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-dimar-red text-white hover:bg-dimar-red-dark disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {azione === 'rianalizza' ? 'Avvio…' : 'Rianalizza'}
+            </button>
+            <button
+              onClick={eliminaFile}
+              disabled={!!azione || v.stato === 'in_analisi'}
+              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              {azione === 'file' ? 'Elimino…' : `Elimina PDF${v.file_bytes ? ` (${(v.file_bytes / 1024 / 1024).toFixed(1)} MB)` : ''}`}
+            </button>
+          </>
+        ) : (
+          <span className="text-[11px] text-gray-400">
+            PDF non conservato: per rianalizzare occorre ricaricare il file.
+          </span>
+        )}
+        <button
+          onClick={eliminaVolantino}
+          disabled={!!azione}
+          className="ml-auto px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40"
+        >
+          {azione === 'volantino' ? 'Elimino…' : 'Elimina volantino'}
+        </button>
       </div>
 
       {v.stato === 'in_analisi' && (

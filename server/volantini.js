@@ -21,8 +21,11 @@ import { PDFDocument } from 'pdf-lib';
 import { query, withTransaction, hasTrigram } from './db.js';
 
 const MODEL = process.env.VOLANTINO_MODEL || 'claude-opus-5';
-const PAGES_PER_CHUNK = Number(process.env.VOLANTINO_PAGES_PER_CHUNK || 4);
-const CONCURRENCY = Number(process.env.VOLANTINO_CONCURRENCY || 3);
+const PAGES_PER_CHUNK = Number(process.env.VOLANTINO_PAGES_PER_CHUNK || 3);
+const CONCURRENCY = Number(process.env.VOLANTINO_CONCURRENCY || 6);
+// Descriptions per classification request: one big call with ~190 items and the
+// full ECR vocabulary was a multi-minute serial step.
+const CLASSIFY_BATCH = Number(process.env.VOLANTINO_CLASSIFY_BATCH || 50);
 
 const client = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;
 
@@ -82,8 +85,9 @@ export async function contaPagine(pdfBuffer) {
   return doc.getPageCount();
 }
 
-async function estraiChunk(pdfBuffer, startIdx, endIdx) {
-  const src = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+// The source document is parsed once and reused: re-loading a 26-page,
+// image-heavy flyer for every chunk was pure waste on a 0.1-CPU instance.
+async function estraiChunk(src, startIdx, endIdx) {
   const out = await PDFDocument.create();
   const indices = [];
   for (let i = startIdx; i < endIdx; i++) indices.push(i);
@@ -103,7 +107,9 @@ async function analizzaChunk(chunkBuffer, offset, nPagine) {
     max_tokens: 32000,
     thinking: { type: 'adaptive' },
     system: [{ type: 'text', text: SYSTEM_ESTRAZIONE, cache_control: { type: 'ephemeral' } }],
-    output_config: { format: betaZodOutputFormat(ChunkSchema) },
+    // Reading a page is perception, not deep reasoning: the default effort
+    // ("high") spent minutes per chunk for no measurable gain.
+    output_config: { effort: 'medium', format: betaZodOutputFormat(ChunkSchema) },
     messages: [{
       role: 'user',
       content: [
@@ -235,21 +241,47 @@ const ClassificazioneSchema = z.object({
   })),
 });
 
-async function classificaConAI(descrizioni) {
-  if (descrizioni.length === 0) return [];
-
-  // Give the model the real ECR vocabulary so it can't invent categories.
+// The ECR vocabulary is ~19.6k tokens and identical on every call, so it is
+// fetched once per process and cached prompt-side.
+let vocabolarioCache = null;
+async function vocabolarioECR() {
+  if (vocabolarioCache) return vocabolarioCache;
   const alb = await query(
     `SELECT DISTINCT reparto, famiglia FROM catalogo_prodotti
      WHERE famiglia IS NOT NULL ORDER BY reparto, famiglia`
   );
   const perReparto = {};
   for (const r of alb.rows) (perReparto[r.reparto] = perReparto[r.reparto] || []).push(r.famiglia);
-
-  const vocabolario = Object.entries(perReparto)
+  vocabolarioCache = Object.entries(perReparto)
     .map(([rep, fams]) => `${rep}: ${fams.join(' | ')}`)
     .join('\n');
+  return vocabolarioCache;
+}
 
+/**
+ * Classify descriptions in parallel batches. A single call carrying every
+ * leftover description plus the whole vocabulary was a multi-minute serial
+ * step; batches of CLASSIFY_BATCH run concurrently instead. Indices returned
+ * by each batch are local, so they are rebased onto the caller's list.
+ */
+async function classificaConAI(descrizioni) {
+  if (descrizioni.length === 0) return [];
+
+  const lotti = [];
+  for (let i = 0; i < descrizioni.length; i += CLASSIFY_BATCH) {
+    lotti.push({ offset: i, items: descrizioni.slice(i, i + CLASSIFY_BATCH) });
+  }
+
+  const esiti = await mapLimit(lotti, CONCURRENCY, async ({ offset, items }) => {
+    const out = await classificaLotto(items);
+    return out.map((e) => ({ ...e, indice: e.indice + offset }));
+  });
+  return esiti.flat();
+}
+
+async function classificaLotto(descrizioni) {
+  if (descrizioni.length === 0) return [];
+  const vocabolario = await vocabolarioECR();
   const elenco = descrizioni.map((d, i) => `${i}. ${d}`).join('\n');
 
   const stream = client.beta.messages.stream({
@@ -268,7 +300,7 @@ Se un testo e' troppo generico o non e' un prodotto (slogan, intestazione, condi
 ALBERO ECR DISPONIBILE (reparto: famiglie):
 ${vocabolario}`,
     }],
-    output_config: { format: betaZodOutputFormat(ClassificazioneSchema) },
+    output_config: { effort: 'medium', format: betaZodOutputFormat(ClassificazioneSchema) },
     messages: [{ role: 'user', content: `Classifica questi ${descrizioni.length} testi:\n\n${elenco}` }],
   });
 
@@ -316,8 +348,9 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
     chunks.push({ start, end });
   }
 
+  const src = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const risultati = await mapLimit(chunks, CONCURRENCY, async ({ start, end }) => {
-    const buf = await estraiChunk(pdfBuffer, start, end);
+    const buf = await estraiChunk(src, start, end);
     return analizzaChunk(buf, start, end - start);
   });
 

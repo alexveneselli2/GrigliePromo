@@ -215,9 +215,21 @@ ALTER TABLE volantini ADD COLUMN IF NOT EXISTS progresso_totale INTEGER NOT NULL
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS aggiornato_il TIMESTAMPTZ;
 
 -- The uploaded PDF, kept so an analysis can be re-run without re-uploading.
--- NEVER select this with *: it is tens of MB per flyer. Use COLONNE_VOLANTINO
--- in routes-volantini.js, which lists every column except this one.
+--
+-- Stored in CHUNKS, not as one BYTEA. Reproduced on the live free-tier
+-- database: a single INSERT carrying a 22 MB parameter killed the Postgres
+-- instance ("Connection terminated unexpectedly", then ECONNREFUSED) — the
+-- server has too little memory to buffer and TOAST a value that size in one
+-- statement. Written a chunk per statement, the same file lands without a
+-- blip. file_dati is left in place for the (empty) legacy path and unused.
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS file_dati BYTEA;
+
+CREATE TABLE IF NOT EXISTS volantino_file_chunk (
+  volantino_id INTEGER NOT NULL REFERENCES volantini(id) ON DELETE CASCADE,
+  seq          INTEGER NOT NULL,
+  dati         BYTEA   NOT NULL,
+  PRIMARY KEY (volantino_id, seq)
+);
 
 CREATE INDEX IF NOT EXISTS idx_cat_norm ON catalogo_prodotti(descrizione_norm);
 CREATE INDEX IF NOT EXISTS idx_albero_cod ON ecr_albero(cod_famiglia);

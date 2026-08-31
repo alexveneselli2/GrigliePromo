@@ -47,6 +47,50 @@ export default function volantiniRouter() {
     } catch (err) { next(err); }
   });
 
+  // ---- ECR taxonomy for the linked dropdowns -----------------------------
+  // Declared before '/:id' so Express doesn't read "tassonomia" as an id.
+  // Cached in memory: it is reference data and never changes at runtime.
+  let tassonomiaCache = null;
+  router.get('/tassonomia', async (_req, res, next) => {
+    try {
+      if (!tassonomiaCache) {
+        const r = await query(
+          `SELECT DISTINCT reparto, famiglia FROM catalogo_prodotti
+            WHERE reparto IS NOT NULL AND famiglia IS NOT NULL
+            ORDER BY reparto, famiglia`
+        );
+        const perReparto = {};
+        for (const row of r.rows) {
+          (perReparto[row.reparto] = perReparto[row.reparto] || []).push(row.famiglia);
+        }
+        tassonomiaCache = { reparti: Object.keys(perReparto).sort(), famiglie: perReparto };
+      }
+      res.json(tassonomiaCache);
+    } catch (err) { next(err); }
+  });
+
+  // ---- bulk approve everything at or above a confidence level ------------
+  router.post('/:id/approva-massivo', async (req, res, next) => {
+    try {
+      const minConfidenza = Number(req.body?.minConfidenza);
+      if (!Number.isFinite(minConfidenza) || minConfidenza < 0 || minConfidenza > 100) {
+        return res.status(400).json({ error: 'minConfidenza deve essere un numero tra 0 e 100.' });
+      }
+      // Only rows that are actually pending and have a classification to approve.
+      const r = await query(
+        `UPDATE volantino_articoli
+            SET da_rivedere = false
+          WHERE volantino_id = $1
+            AND da_rivedere
+            AND confidenza IS NOT NULL
+            AND confidenza >= $2
+            AND famiglia IS NOT NULL`,
+        [Number(req.params.id), minConfidenza]
+      );
+      res.json({ approvati: r.rowCount, minConfidenza });
+    } catch (err) { next(err); }
+  });
+
   // ---- detail -----------------------------------------------------------
   router.get('/:id', async (req, res, next) => {
     try {

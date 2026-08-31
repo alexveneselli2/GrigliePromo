@@ -9,6 +9,10 @@ const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 const BASE = (import.meta.env.VITE_AI_PROXY_URL || '').replace(/\/$/, '');
 const api = (path) => `${BASE}/api/volantini${path}`;
 
+async function readJson0(url) {
+  return readJson(await fetch(url));
+}
+
 async function readJson(res) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
@@ -198,45 +202,118 @@ function UploadForm({ onDone, onError }) {
 // Detail
 // ---------------------------------------------------------------------------
 
-function ReviewRow({ art, onFix }) {
+function ReviewRow({ art, onFix, tassonomia }) {
   const [reparto, setReparto] = useState(art.reparto || '');
   const [famiglia, setFamiglia] = useState(art.famiglia || '');
   const [saving, setSaving] = useState(false);
 
-  const salva = async (confermato) => {
+  // Families available for the chosen reparto. If the stored family isn't in
+  // the list (an AI guess that drifted, or a since-renamed category) it is kept
+  // as an extra option so confirming never silently changes the value.
+  const famiglieDisponibili = useMemo(() => {
+    const base = tassonomia?.famiglie?.[reparto] || [];
+    return famiglia && !base.includes(famiglia) ? [famiglia, ...base] : base;
+  }, [tassonomia, reparto, famiglia]);
+
+  const cambiaReparto = (nuovo) => {
+    setReparto(nuovo);
+    // The old family almost certainly doesn't belong to the new reparto.
+    const fams = tassonomia?.famiglie?.[nuovo] || [];
+    if (!fams.includes(famiglia)) setFamiglia('');
+  };
+
+  const salva = async () => {
     setSaving(true);
     try {
-      await onFix(art.id, { reparto, famiglia, confermato });
+      await onFix(art.id, { reparto, famiglia, confermato: true });
     } finally {
       setSaving(false);
     }
   };
 
+  const confBadge = art.confidenza == null ? 'bg-gray-100 text-gray-500'
+    : art.confidenza >= 80 ? 'bg-emerald-100 text-emerald-700'
+    : art.confidenza >= 60 ? 'bg-amber-100 text-amber-700'
+    : 'bg-red-100 text-red-700';
+
   return (
     <tr className="border-b border-gray-50 hover:bg-amber-50/30">
-      <td className="px-3 py-2 text-[10px] text-gray-400 tabular-nums">p.{art.pagina}</td>
-      <td className="px-3 py-2">
+      <td className="px-3 py-2 text-[10px] text-gray-400 tabular-nums align-top">p.{art.pagina}</td>
+      <td className="px-3 py-2 align-top">
         <div className="text-[11px] font-medium text-gray-800">{art.descrizione}</div>
-        <div className="text-[10px] text-gray-400">
-          {art.origine === 'ai' ? 'classificato da AI' : 'match catalogo'}
-          {art.confidenza != null && ` · confidenza ${art.confidenza}%`}
+        <div className="text-[10px] text-gray-400 flex items-center gap-1.5 mt-0.5">
+          <span>{art.origine === 'ai' ? 'classificato da AI' : 'match catalogo'}</span>
+          {art.confidenza != null && (
+            <span className={`px-1.5 rounded-full font-bold ${confBadge}`}>{art.confidenza}%</span>
+          )}
         </div>
       </td>
-      <td className="px-2 py-2">
-        <input value={reparto} onChange={(e) => setReparto(e.target.value)}
-          className="w-full text-[11px] border border-gray-200 rounded px-2 py-1" />
+      <td className="px-2 py-2 align-top">
+        <select
+          value={reparto}
+          onChange={(e) => cambiaReparto(e.target.value)}
+          className="w-full text-[11px] border border-gray-200 rounded px-1.5 py-1 bg-white cursor-pointer"
+        >
+          <option value="">— seleziona —</option>
+          {(tassonomia?.reparti || []).map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
       </td>
-      <td className="px-2 py-2">
-        <input value={famiglia} onChange={(e) => setFamiglia(e.target.value)}
-          className="w-full text-[11px] border border-gray-200 rounded px-2 py-1" />
+      <td className="px-2 py-2 align-top">
+        <select
+          value={famiglia}
+          onChange={(e) => setFamiglia(e.target.value)}
+          disabled={!reparto}
+          className="w-full text-[11px] border border-gray-200 rounded px-1.5 py-1 bg-white cursor-pointer disabled:bg-gray-50 disabled:text-gray-400"
+        >
+          <option value="">{reparto ? '— seleziona —' : 'scegli prima il reparto'}</option>
+          {famiglieDisponibili.map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
       </td>
-      <td className="px-3 py-2 whitespace-nowrap">
-        <button onClick={() => salva(true)} disabled={saving}
-          className="px-2 py-1 text-[10px] font-bold rounded bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-40">
+      <td className="px-3 py-2 whitespace-nowrap align-top">
+        <button onClick={salva} disabled={saving || !reparto || !famiglia}
+          className="px-2 py-1 text-[10px] font-bold rounded bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed">
           {saving ? '…' : 'Conferma'}
         </button>
       </td>
     </tr>
+  );
+}
+
+// Bulk-approve everything at or above a confidence level.
+function ApprovaMassivo({ articoli, onApprova }) {
+  const [soglia, setSoglia] = useState(80);
+  const [busy, setBusy] = useState(false);
+
+  const quanti = useMemo(
+    () => articoli.filter((a) => (a.confidenza ?? -1) >= soglia && a.famiglia).length,
+    [articoli, soglia]
+  );
+
+  return (
+    <div className="px-4 py-3 bg-white border-b border-gray-200 flex items-center gap-3 flex-wrap">
+      <span className="text-[11px] font-semibold text-dimar-dark">Approvazione massiva</span>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-gray-500">confidenza ≥</span>
+        <input
+          type="range" min={0} max={100} step={5}
+          value={soglia} onChange={(e) => setSoglia(Number(e.target.value))}
+          className="w-40 accent-emerald-600 cursor-pointer"
+        />
+        <span className="text-xs font-bold tabular-nums text-emerald-700 w-10">{soglia}%</span>
+      </div>
+      <span className="text-[11px] text-gray-500">
+        {quanti === 0
+          ? 'nessun articolo sopra questa soglia'
+          : <>verranno approvati <strong className="text-dimar-dark">{quanti}</strong> articoli</>}
+      </span>
+      <button
+        disabled={busy || quanti === 0}
+        onClick={async () => { setBusy(true); try { await onApprova(soglia); } finally { setBusy(false); } }}
+        className="ml-auto px-3 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {busy ? 'Approvazione…' : `Approva ${quanti}`}
+      </button>
+    </div>
   );
 }
 
@@ -245,6 +322,16 @@ function Dettaglio({ id, onBack }) {
   const [daRivedere, setDaRivedere] = useState([]);
   const [errore, setErrore] = useState(null);
   const [tab, setTab] = useState('riepilogo');
+  const [tassonomia, setTassonomia] = useState(null);
+
+  // Reference data for the linked dropdowns: fetched once, never changes.
+  useEffect(() => {
+    let vivo = true;
+    readJson0(api('/tassonomia'))
+      .then((t) => { if (vivo) setTassonomia(t); })
+      .catch(() => { /* i menù restano vuoti, la riga resta comunque leggibile */ });
+    return () => { vivo = false; };
+  }, []);
 
   const carica = useCallback(async () => {
     try {
@@ -265,6 +352,17 @@ function Dettaglio({ id, onBack }) {
     const t = setInterval(carica, 5000);
     return () => clearInterval(t);
   }, [data?.volantino?.stato, carica]);
+
+  const approvaMassivo = async (minConfidenza) => {
+    await readJson(await fetch(api(`/${id}/approva-massivo`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minConfidenza }),
+    }));
+    const r = await readJson(await fetch(api(`/${id}/articoli?daRivedere=1`)));
+    setDaRivedere(r.articoli);
+    carica();
+  };
 
   const fixArticolo = async (articoloId, patch) => {
     await readJson(await fetch(api(`/${id}/articoli/${articoloId}`), {
@@ -454,6 +552,9 @@ function Dettaglio({ id, onBack }) {
             Questi articoli non hanno trovato una corrispondenza sicura nel catalogo: la classificazione
             è stata dedotta. Correggi dove serve e conferma.
           </div>
+          {daRivedere.length > 0 && (
+            <ApprovaMassivo articoli={daRivedere} onApprova={approvaMassivo} />
+          )}
           {daRivedere.length === 0 ? (
             <p className="text-center text-sm text-gray-400 py-10">Nessun articolo da rivedere.</p>
           ) : (
@@ -468,7 +569,9 @@ function Dettaglio({ id, onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {daRivedere.map((a) => <ReviewRow key={a.id} art={a} onFix={fixArticolo} />)}
+                {daRivedere.map((a) => (
+                  <ReviewRow key={a.id} art={a} onFix={fixArticolo} tassonomia={tassonomia} />
+                ))}
               </tbody>
             </table>
           )}

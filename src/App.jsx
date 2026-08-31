@@ -3,6 +3,7 @@ import PROMOZIONI from './data/promozioni';
 import Header from './components/Header';
 import V2View from './components/v2/V2View';
 import AIPlanPanel from './components/ai/AIPlanPanel';
+import BuyerPanel from './components/buyer/BuyerPanel';
 import V1View from './components/v1/V1View';
 import useGridState from './hooks/useGridState';
 import useAIState from './hooks/useAIState';
@@ -20,6 +21,7 @@ export default function App() {
   const [selectedPromoCode, setSelectedPromoCode] = useState(null);
   const [view, setView] = useState('v2');
   const [aiOpen, setAIOpen] = useState(false);
+  const [buyerOpen, setBuyerOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [lastSentAt, setLastSentAt] = useState(INITIAL_LAST_SENT);
   const [saving, setSaving] = useState(false);
@@ -78,6 +80,7 @@ export default function App() {
         view={view}
         onViewChange={setView}
         onOpenAI={() => setAIOpen(true)}
+        onOpenBuyer={() => setBuyerOpen(true)}
         onSave={handleSave}
         onSendData={handleSendData}
         lastSavedAt={lastSavedAt}
@@ -104,6 +107,8 @@ export default function App() {
           onSelectPromo={handlePromoChange}
         />
       )}
+
+      {buyerOpen && <BuyerPanel onClose={() => setBuyerOpen(false)} />}
     </div>
   );
 }

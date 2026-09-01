@@ -14,6 +14,16 @@ const TIPI_EVIDENZA = {
   faro:   { label: 'Faro',   cls: 'bg-violet-100 text-violet-700 border-violet-200' },
   doppio: { label: 'Doppio', cls: 'bg-sky-100 text-sky-700 border-sky-200' },
 };
+// "12/03/26 14:05" — short enough to sit inline in the list.
+function dataOra(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('it-IT', {
+    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 function TipoBadge({ tipo }) {
   const t = TIPI_EVIDENZA[tipo];
   if (!t) return null;
@@ -292,7 +302,15 @@ function FormModifica({ v, onSalva, onAnnulla }) {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6 space-y-3">
-      <h3 className="text-sm font-bold text-dimar-dark">Modifica dati del volantino</h3>
+      <h3 className="text-sm font-bold text-dimar-dark">
+        {v.da_completare ? 'Completa i dati del volantino' : 'Modifica dati del volantino'}
+      </h3>
+      {v.da_completare && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Arrivato da un import massivo: nome, canali e periodo sono ancora provvisori.
+          L'analisi intanto prosegue per conto suo.
+        </p>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="sm:col-span-2">
           <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Nome *</label>
@@ -350,18 +368,11 @@ function FormModifica({ v, onSalva, onAnnulla }) {
 }
 
 function FormBulk({ onDone, onError }) {
-  const now = new Date();
   const [files, setFiles] = useState([]);
-  const [canali, setCanali] = useState([]);
-  const [mese, setMese] = useState(now.getMonth() + 1);
-  const [anno, setAnno] = useState(now.getFullYear());
-  const [progressivoDa, setProgressivoDa] = useState(1);
-  const [nota, setNota] = useState('');
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
 
-  const toggle = (c) => setCanali((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
-  const valido = files.length > 0 && canali.length > 0;
+  const valido = files.length > 0;
   const pesoTot = files.reduce((s, f) => s + f.size, 0);
 
   const submit = async (e) => {
@@ -371,11 +382,6 @@ function FormBulk({ onDone, onError }) {
     try {
       const fd = new FormData();
       for (const f of files) fd.append('pdf', f);
-      fd.append('canali', JSON.stringify(canali));
-      fd.append('mese', String(mese));
-      fd.append('anno', String(anno));
-      fd.append('progressivoDa', String(progressivoDa));
-      fd.append('nota', nota);
       const data = await readJson(await fetch(api('/bulk'), { method: 'POST', body: fd }));
       setFiles([]); if (inputRef.current) inputRef.current.value = '';
       onDone(data);
@@ -390,6 +396,7 @@ function FormBulk({ onDone, onError }) {
         <h3 className="text-sm font-bold text-dimar-dark">Import massivo</h3>
         <p className="text-[11px] text-gray-500 mt-0.5">
           Carica più volantini insieme: vengono messi in coda e analizzati <strong>uno alla volta</strong>.
+          Nessun dato da inserire ora — nome, canali e periodo si compilano dopo, dalla lista.
         </p>
       </div>
 
@@ -415,7 +422,7 @@ function FormBulk({ onDone, onError }) {
         <ul className="max-h-28 overflow-y-auto text-[11px] text-gray-600 space-y-0.5 border border-gray-100 rounded-lg p-2">
           {files.map((f, i) => (
             <li key={i} className="flex gap-2">
-              <span className="text-gray-400 tabular-nums w-6">{progressivoDa + i}</span>
+              <span className="text-gray-400 tabular-nums w-4">{i + 1}</span>
               <span className="flex-1 truncate">{f.name}</span>
               <span className="text-gray-400">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
             </li>
@@ -423,51 +430,20 @@ function FormBulk({ onDone, onError }) {
         </ul>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="sm:col-span-2">
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Canali * (validi per tutti)</label>
-          <div className="flex flex-wrap gap-1.5">
-            {CANALI.map((c) => (
-              <button key={c} type="button" onClick={() => toggle(c)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                  canali.includes(c) ? 'bg-dimar-red text-white border-dimar-red'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Periodo *</label>
-          <div className="flex gap-2">
-            <select value={mese} onChange={(e) => setMese(Number(e.target.value))}
-              className="flex-1 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white">
-              {MESI.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
-            <input type="number" value={anno} onChange={(e) => setAnno(Number(e.target.value))}
-              className="w-24 text-sm border border-gray-300 rounded-lg px-2 py-2" />
-          </div>
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Progressivo da *</label>
-          <input type="number" value={progressivoDa} onChange={(e) => setProgressivoDa(Number(e.target.value))}
-            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
-        </div>
-        <div className="sm:col-span-2">
-          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Nota (per tutti)</label>
-          <input value={nota} onChange={(e) => setNota(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
-        </div>
+      <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-[11px] text-slate-600 space-y-1">
+        <p>
+          Ogni file entra come <strong>Import 1</strong>, <strong>Import 2</strong>… con un progressivo
+          che continua dagli import precedenti.
+        </p>
+        <p>
+          Restano segnati <strong>“dati da completare”</strong> finché non indichi nome, canali e periodo:
+          li trovi in cima alla lista e li compili quando vuoi, anche mentre l’analisi è in corso.
+        </p>
       </div>
-
-      <p className="text-[10px] text-gray-400">
-        Il nome di ogni volantino viene preso dal nome del file; il progressivo si incrementa da solo.
-        Puoi correggerli dopo, dal dettaglio.
-      </p>
 
       <button type="submit" disabled={!valido || busy}
         className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-gradient-to-r from-slate-700 to-slate-500 disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md transition-all">
-        {busy ? 'Caricamento…' : `Carica ${files.length || ''} volantini in coda`}
+        {busy ? 'Caricamento…' : files.length ? `Carica ${files.length} volantini in coda` : 'Carica i volantini in coda'}
       </button>
     </form>
   );
@@ -648,7 +624,11 @@ function Dettaglio({ id, onBack }) {
   };
 
   const [azione, setAzione] = useState(null); // 'rianalizza' | 'file' | 'volantino'
+  // Bulk-imported flyers open straight on the edit form: filling in name,
+  // channels and period is the only thing left to do on them.
   const [modifica, setModifica] = useState(false);
+  const daCompletare = data?.volantino?.da_completare;
+  useEffect(() => { if (daCompletare) setModifica(true); }, [daCompletare]);
 
   const salvaModifica = async (patch) => {
     await readJson(await fetch(api(`/${id}`), {
@@ -819,7 +799,9 @@ function Dettaglio({ id, onBack }) {
               <p className="text-white/80 text-xs font-semibold uppercase tracking-widest mb-1">Catalogazione volantino</p>
               <h1 className="text-2xl font-extrabold">{v.nome}</h1>
               <p className="text-white/90 text-sm mt-1">
-                {MESI[v.mese - 1]} {v.anno} · progressivo {v.progressivo}
+                {v.da_completare
+                  ? 'Dati da completare — nome, canali e periodo non sono ancora stati inseriti'
+                  : <>{MESI[v.mese - 1]} {v.anno} · progressivo {v.progressivo}</>}
               </p>
               <div className="flex gap-1.5 mt-2 flex-wrap">
                 {(v.canali || []).map((c) => (
@@ -1412,12 +1394,27 @@ function Dettaglio({ id, onBack }) {
 
 // ---------------------------------------------------------------------------
 
+// How the flyer list can be ordered. `val` returns a comparable key; strings
+// are compared with localeCompare so accented names sort as an Italian expects.
+const ORDINAMENTI = {
+  import: { label: 'Data di import', val: (v) => new Date(v.creato_il).getTime() },
+  nome: { label: 'Nome', val: (v) => v.nome || '', testo: true },
+  periodo: { label: 'Periodo', val: (v) => v.anno * 10000 + v.mese * 100 + (v.progressivo || 0) },
+  stato: { label: 'Stato', val: (v) => v.stato || '', testo: true },
+  articoli: { label: 'Articoli', val: (v) => Number(v.n_articoli || 0) },
+  rivedere: { label: 'Da rivedere', val: (v) => Number(v.n_da_rivedere || 0) },
+  pagine: { label: 'Pagine', val: (v) => Number(v.pagine || 0) },
+};
+
 export default function VolantiniPage({ onClose }) {
   const [lista, setLista] = useState(null);
   const [errore, setErrore] = useState(null);
   const [apertoId, setApertoId] = useState(null);
   const [modo, setModo] = useState('singolo');
   const [coda, setCoda] = useState(null);
+  const [ordine, setOrdine] = useState('import');
+  const [discendente, setDiscendente] = useState(true);
+  const [eliminando, setEliminando] = useState(null);
 
   const carica = useCallback(async () => {
     try {
@@ -1439,6 +1436,33 @@ export default function VolantiniPage({ onClose }) {
     const t = setInterval(carica, 6000);
     return () => clearInterval(t);
   }, [lista, carica]);
+
+  const ordinati = useMemo(() => {
+    if (!lista) return lista;
+    const { val, testo } = ORDINAMENTI[ordine] || ORDINAMENTI.import;
+    const segno = discendente ? -1 : 1;
+    return [...lista].sort((a, b) => {
+      const x = val(a), y = val(b);
+      const cmp = testo ? String(x).localeCompare(String(y), 'it') : x - y;
+      // Same key: newest import first, so the order never looks random.
+      return cmp !== 0 ? cmp * segno : b.id - a.id;
+    });
+  }, [lista, ordine, discendente]);
+
+  const elimina = async (v, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Elimino "${v.nome}" e tutta la sua catalogazione? L'operazione non è reversibile.`)) return;
+    setEliminando(v.id);
+    try {
+      await readJson(await fetch(api(`/${v.id}`), { method: 'DELETE' }));
+      setErrore(null);
+      await carica();
+    } catch (err) {
+      setErrore(err.message);
+    } finally {
+      setEliminando(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[55] bg-gray-50 overflow-y-auto">
@@ -1494,10 +1518,26 @@ export default function VolantiniPage({ onClose }) {
           </div>
 
           <div>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
               <h3 className="text-sm font-bold text-dimar-dark">Volantini caricati</h3>
               {lista?.length > 0 && (
-                <BottoneExport url={api('/export')} nome="volantini.xlsx" className="ml-auto" />
+                <>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ordina per</label>
+                    <select value={ordine} onChange={(e) => setOrdine(e.target.value)}
+                      className="text-[11px] border border-gray-300 rounded-lg px-2 py-1.5 bg-white cursor-pointer">
+                      {Object.entries(ORDINAMENTI).map(([k, o]) => (
+                        <option key={k} value={k}>{o.label}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => setDiscendente((d) => !d)}
+                      title={discendente ? 'Ordine decrescente' : 'Ordine crescente'}
+                      className="px-2 py-1.5 text-[11px] font-bold border border-gray-300 rounded-lg bg-white text-gray-600 hover:border-gray-400">
+                      {discendente ? '↓' : '↑'}
+                    </button>
+                  </div>
+                  <BottoneExport url={api('/export')} nome="volantini.xlsx" />
+                </>
               )}
             </div>
             {coda && (coda.inCorso || coda.inAttesa > 0) && (
@@ -1517,27 +1557,51 @@ export default function VolantiniPage({ onClose }) {
               </p>
             )}
             <div className="space-y-2">
-              {lista?.map((v) => (
-                <button key={v.id} onClick={() => setApertoId(v.id)}
-                  className="w-full text-left bg-white border border-gray-200 rounded-xl p-4 hover:border-dimar-red/40 hover:shadow-sm transition-all">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-sm text-dimar-dark">{v.nome}</span>
-                    <StatoBadge stato={v.stato} />
-                    {Number(v.n_da_rivedere) > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">
-                        {v.n_da_rivedere} da rivedere
-                      </span>
+              {ordinati?.map((v) => (
+                <div key={v.id}
+                  className={`flex items-start gap-2 bg-white border rounded-xl transition-all ${
+                    v.da_completare ? 'border-amber-300' : 'border-gray-200'
+                  } hover:border-dimar-red/40 hover:shadow-sm`}>
+                  <button onClick={() => setApertoId(v.id)} className="flex-1 text-left p-4 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-bold text-sm text-dimar-dark">{v.nome}</span>
+                      <StatoBadge stato={v.stato} />
+                      {v.da_completare && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">
+                          dati da completare
+                        </span>
+                      )}
+                      {Number(v.n_da_rivedere) > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">
+                          {v.n_da_rivedere} da rivedere
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {v.da_completare
+                        ? <>Nome, canali e periodo da inserire · {v.pagine} pagine · {v.n_articoli} articoli</>
+                        : <>{MESI[v.mese - 1]} {v.anno} · progressivo {v.progressivo} · {v.pagine} pagine · {v.n_articoli} articoli</>}
+                    </div>
+                    <div className="flex gap-1 mt-1.5 flex-wrap items-center">
+                      {(v.canali || []).map((c) => (
+                        <span key={c} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[9px] font-semibold">{c}</span>
+                      ))}
+                      <span className="text-[10px] text-gray-400">importato il {dataOra(v.creato_il)}</span>
+                    </div>
+                  </button>
+                  <button onClick={(e) => elimina(v, e)} disabled={eliminando === v.id}
+                    title="Elimina volantino"
+                    className="shrink-0 m-3 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40">
+                    {eliminando === v.id ? (
+                      <span className="block w-4 h-4 rounded-full border-2 border-red-200 border-t-red-500 animate-spin" />
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
                     )}
-                  </div>
-                  <div className="text-[11px] text-gray-500">
-                    {MESI[v.mese - 1]} {v.anno} · progressivo {v.progressivo} · {v.pagine} pagine · {v.n_articoli} articoli
-                  </div>
-                  <div className="flex gap-1 mt-1.5 flex-wrap">
-                    {(v.canali || []).map((c) => (
-                      <span key={c} className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[9px] font-semibold">{c}</span>
-                    ))}
-                  </div>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
           </div>

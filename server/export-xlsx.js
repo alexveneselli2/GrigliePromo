@@ -236,7 +236,7 @@ export async function esportaLista(volantinoId, tipo) {
 export async function esportaVolantini() {
   const r = await query(
     `SELECT v.nome, v.canali, v.mese, v.anno, v.progressivo, v.nota,
-            v.pagine, v.stato, v.file_nome, v.modello, v.creato_il,
+            v.pagine, v.stato, v.file_nome, v.modello, v.creato_il, v.da_completare,
             (SELECT COUNT(*) FROM volantino_articoli a WHERE a.volantino_id = v.id) AS articoli,
             (SELECT COUNT(*) FROM volantino_articoli a WHERE a.volantino_id = v.id AND a.in_evidenza) AS in_evidenza,
             (SELECT COUNT(*) FROM volantino_zone z WHERE z.volantino_id = v.id) AS zone_fornitore,
@@ -249,7 +249,10 @@ export async function esportaVolantini() {
   wb.creator = 'Dimar — Catalogazione volantini';
   wb.created = new Date();
   const ws = wb.addWorksheet('Volantini');
-  ws.columns = [
+  // Kept in a local array: ExcelJS rebuilds ws.columns as its own Column
+  // objects and drops the `numero` flag, so reading it back loses the
+  // information normalizzaRiga needs and every count lands as text.
+  const colonne = [
     { header: 'Nome', key: 'nome', width: 34 },
     { header: 'Canali', key: 'canali', width: 34 },
     { header: 'Mese', key: 'mese', width: 12 },
@@ -261,21 +264,29 @@ export async function esportaVolantini() {
     { header: 'Zone fornitore', key: 'zone_fornitore', numero: true, width: 14 },
     { header: 'Da rivedere', key: 'da_rivedere', numero: true, width: 12 },
     { header: 'Stato', key: 'stato', width: 12 },
+    { header: 'Dati', key: 'dati', width: 16 },
     { header: 'File', key: 'file_nome', width: 34 },
     { header: 'Modello', key: 'modello', width: 18 },
     { header: 'Caricato il', key: 'creato_il', width: 20 },
     { header: 'Nota', key: 'nota', width: 50 },
   ];
+  ws.columns = colonne;
   intestazione(ws);
   for (const row of r.rows) {
+    // A bulk-imported row carries placeholder period values until someone
+    // fills them in; exporting them as real data would be misleading.
+    const daCompletare = row.da_completare;
     ws.addRow(normalizzaRiga({
       ...row,
       canali: (row.canali || []).join(', '),
-      mese: MESI[row.mese - 1] || row.mese,
+      mese: daCompletare ? '' : (MESI[row.mese - 1] || row.mese),
+      anno: daCompletare ? '' : row.anno,
+      progressivo: daCompletare ? '' : row.progressivo,
+      dati: daCompletare ? 'da completare' : 'completi',
       creato_il: row.creato_il ? new Date(row.creato_il).toLocaleString('it-IT') : '',
-    }, ws.columns));
+    }, colonne));
   }
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 15 } };
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colonne.length } };
 
   return {
     buffer: await wb.xlsx.writeBuffer(),

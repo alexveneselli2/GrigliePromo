@@ -24,7 +24,7 @@ function inviaXlsx(res, { buffer, filename }) {
 // Every column of `volantini` EXCEPT file_dati, which holds the raw PDF and
 // must never be dragged into list/detail responses.
 const COLONNE_VOLANTINO = `id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
-   pagine, stato, errore, modello, tentativi, creato_il, completato_il,
+   pagine, stato, errore, modello, tentativi, creato_il, completato_il, da_completare,
    fase, progresso_fatto, progresso_totale, aggiornato_il,
    (EXISTS (SELECT 1 FROM volantino_file_chunk c WHERE c.volantino_id = volantini.id)) AS ha_file`;
 
@@ -104,7 +104,9 @@ export default function volantiniRouter() {
         return res.status(400).json({ error: `Campi non validi: ${errori.join(', ')}` });
       }
 
-      // COALESCE keeps every field the caller didn't send.
+      // COALESCE keeps every field the caller didn't send. Supplying the
+      // channels is what a bulk-imported row is missing, so that edit is also
+      // what clears the "da completare" flag.
       const r = await query(
         `UPDATE volantini
             SET nome        = COALESCE($1, nome),
@@ -112,7 +114,8 @@ export default function volantiniRouter() {
                 mese        = COALESCE($3, mese),
                 anno        = COALESCE($4, anno),
                 progressivo = COALESCE($5, progressivo),
-                nota        = COALESCE($6, nota)
+                nota        = COALESCE($6, nota),
+                da_completare = CASE WHEN $2::text[] IS NULL THEN da_completare ELSE false END
           WHERE id = $7
           RETURNING ${COLONNE_VOLANTINO}`,
         [
@@ -319,35 +322,24 @@ export default function volantiniRouter() {
   });
 
   // ---- bulk import: many flyers, analysed one at a time ------------------
+  // No metadata is asked for here: the point of a bulk import is to get the
+  // PDFs into the queue straight away. Each row is created as "Import N" and
+  // flagged `da_completare`; name, channels and period are filled in later
+  // from the list, while the analysis is already running.
   router.post('/bulk', upload.array('pdf', 30), async (req, res, next) => {
     try {
       const files = req.files || [];
       if (files.length === 0) return res.status(400).json({ error: 'Nessun PDF caricato.' });
 
-      const { mese, anno, nota } = req.body || {};
-      let canali = req.body.canali;
-      if (typeof canali === 'string') {
-        try { canali = JSON.parse(canali); } catch { canali = [canali]; }
-      }
-      canali = Array.isArray(canali) ? canali : [];
-      const progressivoDa = Number(req.body.progressivoDa || 1);
-
-      const errori = [];
-      if (!(Number(mese) >= 1 && Number(mese) <= 12)) errori.push('mese');
-      if (!(Number(anno) >= 2000 && Number(anno) <= 2100)) errori.push('anno');
-      if (canali.length === 0) errori.push('canali');
-      const nv = canali.filter((c) => !CANALI_VALIDI.includes(c));
-      if (nv.length) errori.push(`canali non validi: ${nv.join(', ')}`);
-      if (!Number.isInteger(progressivoDa)) errori.push('progressivoDa');
-      if (errori.length) {
-        return res.status(400).json({ error: `Campi mancanti o non validi: ${errori.join(', ')}` });
-      }
+      // Placeholders for the NOT NULL period columns until the user fills them.
+      const oggi = new Date();
+      const mese = oggi.getMonth() + 1;
+      const anno = oggi.getFullYear();
 
       // Create every row first so the client gets the full list back at once;
       // the queue then works through them strictly one at a time.
       const creati = [];
       const scartati = [];
-      let prog = progressivoDa;
       for (const f of files) {
         let pagine = 0;
         try {
@@ -356,14 +348,14 @@ export default function volantiniRouter() {
           scartati.push({ file: f.originalname, motivo: 'PDF non leggibile' });
           continue;
         }
-        // The file name, minus extension, is the most useful default name.
-        const nome = f.originalname.replace(/\.pdf$/i, '').trim() || `Volantino ${prog}`;
+        // The sequence hands out the number; it also becomes the progressivo,
+        // so the placeholder row is internally consistent until it is edited.
         const ins = await query(
-          `INSERT INTO volantini (nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes, pagine, stato)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_coda')
+          `INSERT INTO volantini (nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes, pagine, stato, da_completare)
+           SELECT 'Import ' || n, '{}', $1, $2, n, '', $3, $4, $5, 'in_coda', true
+             FROM nextval('import_progressivo') AS n
            RETURNING ${COLONNE_VOLANTINO}`,
-          [nome, canali, Number(mese), Number(anno), prog++, nota ? String(nota) : '',
-           f.originalname, f.size, pagine]
+          [mese, anno, f.originalname, f.size, pagine]
         );
         creati.push(ins.rows[0]);
         try {

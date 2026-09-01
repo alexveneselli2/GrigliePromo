@@ -226,6 +226,18 @@ ALTER TABLE volantini ADD COLUMN IF NOT EXISTS file_dati BYTEA;
 -- How many times the analysis has been attempted; caps the boot-resume loop.
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS tentativi INTEGER NOT NULL DEFAULT 0;
 
+-- A bulk import creates rows before anyone has typed their data: the PDFs go
+-- straight into the analysis queue and name/channels/period are filled in
+-- afterwards. mese/anno/progressivo are NOT NULL, so they get placeholders and
+-- this flag is what tells the UI (and the user) that they are not real yet.
+ALTER TABLE volantini ADD COLUMN IF NOT EXISTS da_completare BOOLEAN NOT NULL DEFAULT false;
+
+-- Numbering for those placeholder names ("Import 1", "Import 2", …). A
+-- sequence rather than MAX(...) over the existing names: once a row is renamed
+-- to its real name the number disappears from the table, and a counter derived
+-- from the names would restart and hand out a number already used.
+CREATE SEQUENCE IF NOT EXISTS import_progressivo;
+
 -- Highlight type: 'cover' (page 1), 'faro' (bigger AND with its own graphic
 -- treatment) or 'doppio' (merely bigger, same white background). in_evidenza
 -- stays as the derived boolean so existing queries keep working.

@@ -581,10 +581,14 @@ export async function riclassifica(volantinoId) {
 
 export async function riepilogo(volantinoId) {
   const [testata, perFamiglia, zone, totali, perPagina] = await Promise.all([
+    // ha_file looks in volantino_file_chunk: since the PDF is stored in chunks
+    // file_dati is always NULL, and testing it reported every stored PDF as
+    // missing — which hid the "rianalizza" action on flyers that had one.
     query(`SELECT id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
-   pagine, stato, errore, modello, creato_il, completato_il,
+   pagine, stato, errore, modello, creato_il, completato_il, da_completare,
    fase, progresso_fatto, progresso_totale, aggiornato_il,
-   (file_dati IS NOT NULL) AS ha_file FROM volantini WHERE id = $1`, [volantinoId]),
+   EXISTS (SELECT 1 FROM volantino_file_chunk c WHERE c.volantino_id = volantini.id) AS ha_file
+     FROM volantini WHERE id = $1`, [volantinoId]),
     query(
       `SELECT reparto, famiglia,
               COUNT(*)                                    AS articoli,

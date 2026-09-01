@@ -62,17 +62,31 @@ app.use((req, res, next) => {
   })(req, res, next);
 });
 
-app.get('/health', async (_req, res) => {
-  // Actually query the database: reporting db:true just because a URL is set
-  // made /health useless exactly when it mattered.
+// LIVENESS — this is render.yaml's healthCheckPath, so Render restarts the
+// instance when it fails. It must therefore stay cheap and depend on nothing
+// external: a version of this that queried Postgres turned a slow database (or
+// an instance busy analysing a flyer) into a restart loop, which surfaced as
+// intermittent 503s and killed running analyses.
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  model: MODEL,
+  ai: HAS_KEY,
+  db: hasDb(),          // configured, not reachable — see /diagnostica
+  volantini: hasDb() && HAS_KEY,
+}));
+
+// READINESS / diagnostics — actually talks to the database. Deliberately NOT
+// the health check path, so a database problem never restarts the service.
+app.get('/diagnostica', async (_req, res) => {
   const db = hasDb() ? await pingDb() : { ok: false, motivo: 'DATABASE_URL non configurato' };
   res.json({
-    ok: true,
-    model: MODEL,
     ai: HAS_KEY,
-    db: db.ok,
-    dbInfo: db,
-    volantini: db.ok && HAS_KEY,
+    db,
+    memoria: {
+      rssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heapMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    },
+    uptimeSec: Math.round(process.uptime()),
   });
 });
 

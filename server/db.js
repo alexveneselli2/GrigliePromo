@@ -223,6 +223,8 @@ ALTER TABLE volantini ADD COLUMN IF NOT EXISTS aggiornato_il TIMESTAMPTZ;
 -- statement. Written a chunk per statement, the same file lands without a
 -- blip. file_dati is left in place for the (empty) legacy path and unused.
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS file_dati BYTEA;
+-- How many times the analysis has been attempted; caps the boot-resume loop.
+ALTER TABLE volantini ADD COLUMN IF NOT EXISTS tentativi INTEGER NOT NULL DEFAULT 0;
 
 -- Highlight type: 'cover' (page 1), 'faro' (bigger AND with its own graphic
 -- treatment) or 'doppio' (merely bigger, same white background). in_evidenza

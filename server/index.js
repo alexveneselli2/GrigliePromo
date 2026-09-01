@@ -309,21 +309,12 @@ async function boot() {
     try {
       await initSchema();
 
-      // The analysis runs in this process, so a restart (deploy, crash, Render
-      // recycling the instance) always kills any run in flight. Without this
-      // the row stays 'in_analisi' forever and the UI spins on nothing.
-      const { query } = await import('./db.js');
-      const orfani = await query(
-        `UPDATE volantini
-            SET stato = 'errore',
-                errore = 'Analisi interrotta dal riavvio del server. Ricarica il volantino per rianalizzarlo.',
-                fase = NULL, progresso_fatto = 0, progresso_totale = 0
-          WHERE stato = 'in_analisi'
-        RETURNING id`
-      );
-      if (orfani.rows.length > 0) {
-        console.warn(`[boot] ${orfani.rows.length} analisi interrotte da un riavvio, marcate come errore: ${orfani.rows.map(r => r.id).join(', ')}`);
-      }
+      // The analysis runs in this process, so a restart always kills whatever
+      // was in flight. Now that the PDF is stored, those runs are RESUMED
+      // rather than failed — capped by an attempt counter so a flyer that
+      // reliably crashes the process can't put the service in a restart loop.
+      const { riprendiInterrotti } = await import('./coda.js');
+      await riprendiInterrotti();
 
       const { seedIfEmpty } = await import('./seed/load.js');
       await seedIfEmpty();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
 
 const CANALI = ['Mercatò', 'Mercatò Local', 'Mercatò Big', 'Mercatò Extra'];
 // The phases the analysis reports, in the order they run.
@@ -68,6 +68,7 @@ function StatCard({ label, value, sub, tone = 'slate' }) {
 
 function StatoBadge({ stato }) {
   const map = {
+    in_coda: { label: 'In coda', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
     in_analisi: { label: 'In analisi', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
     completato: { label: 'Completato', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
     errore: { label: 'Errore', cls: 'bg-red-100 text-red-700 border-red-200' },
@@ -348,6 +349,130 @@ function FormModifica({ v, onSalva, onAnnulla }) {
   );
 }
 
+function FormBulk({ onDone, onError }) {
+  const now = new Date();
+  const [files, setFiles] = useState([]);
+  const [canali, setCanali] = useState([]);
+  const [mese, setMese] = useState(now.getMonth() + 1);
+  const [anno, setAnno] = useState(now.getFullYear());
+  const [progressivoDa, setProgressivoDa] = useState(1);
+  const [nota, setNota] = useState('');
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+
+  const toggle = (c) => setCanali((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+  const valido = files.length > 0 && canali.length > 0;
+  const pesoTot = files.reduce((s, f) => s + f.size, 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!valido || busy) return;
+    setBusy(true); onError(null);
+    try {
+      const fd = new FormData();
+      for (const f of files) fd.append('pdf', f);
+      fd.append('canali', JSON.stringify(canali));
+      fd.append('mese', String(mese));
+      fd.append('anno', String(anno));
+      fd.append('progressivoDa', String(progressivoDa));
+      fd.append('nota', nota);
+      const data = await readJson(await fetch(api('/bulk'), { method: 'POST', body: fd }));
+      setFiles([]); if (inputRef.current) inputRef.current.value = '';
+      onDone(data);
+    } catch (err) {
+      onError(err.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-dimar-dark">Import massivo</h3>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          Carica più volantini insieme: vengono messi in coda e analizzati <strong>uno alla volta</strong>.
+        </p>
+      </div>
+
+      <label className={`block border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors ${
+        files.length ? 'border-emerald-300 bg-emerald-50/40' : 'border-gray-300 hover:border-dimar-red/50 hover:bg-red-50/30'
+      }`}>
+        <input ref={inputRef} type="file" accept="application/pdf" multiple className="hidden"
+          onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+        {files.length ? (
+          <div>
+            <p className="text-sm font-semibold text-emerald-700">{files.length} PDF selezionati</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{(pesoTot / 1024 / 1024).toFixed(1)} MB in totale — clicca per cambiare</p>
+          </div>
+        ) : (
+          <div className="text-gray-500">
+            <p className="text-sm font-semibold">Seleziona più PDF</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">Massimo 30 file, 60 MB ciascuno</p>
+          </div>
+        )}
+      </label>
+
+      {files.length > 0 && (
+        <ul className="max-h-28 overflow-y-auto text-[11px] text-gray-600 space-y-0.5 border border-gray-100 rounded-lg p-2">
+          {files.map((f, i) => (
+            <li key={i} className="flex gap-2">
+              <span className="text-gray-400 tabular-nums w-6">{progressivoDa + i}</span>
+              <span className="flex-1 truncate">{f.name}</span>
+              <span className="text-gray-400">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="sm:col-span-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Canali * (validi per tutti)</label>
+          <div className="flex flex-wrap gap-1.5">
+            {CANALI.map((c) => (
+              <button key={c} type="button" onClick={() => toggle(c)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  canali.includes(c) ? 'bg-dimar-red text-white border-dimar-red'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Periodo *</label>
+          <div className="flex gap-2">
+            <select value={mese} onChange={(e) => setMese(Number(e.target.value))}
+              className="flex-1 text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white">
+              {MESI.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+            <input type="number" value={anno} onChange={(e) => setAnno(Number(e.target.value))}
+              className="w-24 text-sm border border-gray-300 rounded-lg px-2 py-2" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Progressivo da *</label>
+          <input type="number" value={progressivoDa} onChange={(e) => setProgressivoDa(Number(e.target.value))}
+            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Nota (per tutti)</label>
+          <input value={nota} onChange={(e) => setNota(e.target.value)}
+            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" />
+        </div>
+      </div>
+
+      <p className="text-[10px] text-gray-400">
+        Il nome di ogni volantino viene preso dal nome del file; il progressivo si incrementa da solo.
+        Puoi correggerli dopo, dal dettaglio.
+      </p>
+
+      <button type="submit" disabled={!valido || busy}
+        className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-gradient-to-r from-slate-700 to-slate-500 disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md transition-all">
+        {busy ? 'Caricamento…' : `Carica ${files.length || ''} volantini in coda`}
+      </button>
+    </form>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Detail
 // ---------------------------------------------------------------------------
@@ -600,7 +725,19 @@ function Dettaglio({ id, onBack }) {
   };
 
   const [repartoAttivo, setRepartoAttivo] = useState(null);
-  const [raggruppa, setRaggruppa] = useState('famiglia'); // famiglia | reparto | pagina
+  const [raggruppa, setRaggruppa] = useState('famiglia'); // famiglia | reparto | pagina | tipo
+  const [paginaAperta, setPaginaAperta] = useState(null);
+  const [articoliPagina, setArticoliPagina] = useState([]);
+
+  const apriPagina = async (n) => {
+    if (paginaAperta === n) { setPaginaAperta(null); return; }
+    setPaginaAperta(n);
+    setArticoliPagina([]);
+    try {
+      const r = await readJson(await fetch(api(`/${id}/articoli?pagina=${n}`)));
+      setArticoliPagina(r.articoli);
+    } catch (err) { setErrore(err.message); }
+  };
 
   const perReparto = useMemo(() => {
     if (!data) return [];
@@ -1016,7 +1153,7 @@ function Dettaglio({ id, onBack }) {
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-gray-500">
-              Composizione di ogni pagina del volantino.
+              Composizione di ogni pagina. Clicca una riga per vedere gli articoli e come sono classificati.
             </span>
             <BottoneExport url={api(`/${id}/export?tipo=pagine`)} nome="per-pagina.xlsx" className="ml-auto" />
           </div>
@@ -1037,8 +1174,17 @@ function Dettaglio({ id, onBack }) {
               </thead>
               <tbody>
                 {(data.perPagina || []).map((p) => (
-                  <tr key={p.pagina} className="border-b border-gray-50 hover:bg-red-50/20">
-                    <td className="px-4 py-1.5 font-bold text-dimar-dark tabular-nums">{p.pagina}</td>
+                  <Fragment key={p.pagina}>
+                  <tr
+                    onClick={() => apriPagina(p.pagina)}
+                    className={`border-b border-gray-50 cursor-pointer ${
+                      paginaAperta === p.pagina ? 'bg-red-50/50' : 'hover:bg-red-50/20'
+                    }`}
+                  >
+                    <td className="px-4 py-1.5 font-bold text-dimar-dark tabular-nums">
+                      <span className="inline-block w-3 text-gray-400">{paginaAperta === p.pagina ? '▾' : '▸'}</span>
+                      {p.pagina}
+                    </td>
                     <td className="px-3 py-1.5 text-right font-mono font-bold">{p.articoli}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-indigo-600">{Number(p.cover) || ''}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-violet-600">{Number(p.faro) || ''}</td>
@@ -1048,6 +1194,70 @@ function Dettaglio({ id, onBack }) {
                     <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{Number(p.in_zona_fornitore) || ''}</td>
                     <td className="px-4 py-1.5 text-right font-mono text-amber-600">{Number(p.da_rivedere) || ''}</td>
                   </tr>
+                  {paginaAperta === p.pagina && (
+                    <tr>
+                      <td colSpan={9} className="bg-gray-50 px-4 py-3">
+                        {articoliPagina.length === 0 ? (
+                          <p className="text-[11px] text-gray-400">Caricamento…</p>
+                        ) : (
+                          <table className="w-full text-[11px] bg-white rounded-lg overflow-hidden">
+                            <thead>
+                              <tr className="border-b border-gray-200 text-gray-400">
+                                <th className="text-left px-3 py-1.5 font-semibold">Articolo</th>
+                                <th className="text-left px-2 py-1.5 font-semibold">Tipo</th>
+                                <th className="text-left px-2 py-1.5 font-semibold">Reparto</th>
+                                <th className="text-left px-2 py-1.5 font-semibold">Famiglia ECR</th>
+                                <th className="text-left px-2 py-1.5 font-semibold">Classificazione</th>
+                                <th className="text-right px-3 py-1.5 font-semibold">Prezzo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {articoliPagina.map((a) => (
+                                <tr key={a.id} className="border-b border-gray-50">
+                                  <td className="px-3 py-1.5 text-gray-800">
+                                    {a.descrizione}
+                                    {a.fidelity && (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold">
+                                        Fidelity
+                                      </span>
+                                    )}
+                                    {a.zona_fornitore && (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
+                                        {a.zona_fornitore}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-1.5"><TipoBadge tipo={a.tipo_evidenza} /></td>
+                                  <td className="px-2 py-1.5 text-gray-500 max-w-[160px] truncate" title={a.reparto || ''}>
+                                    {a.reparto || <span className="text-gray-300">—</span>}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-gray-500 max-w-[200px] truncate" title={a.famiglia || ''}>
+                                    {a.famiglia || <span className="text-gray-300">non classificata</span>}
+                                  </td>
+                                  <td className="px-2 py-1.5 whitespace-nowrap">
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                      a.origine === 'manuale' ? 'bg-gray-200 text-gray-700'
+                                      : a.origine === 'catalogo' ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      {a.origine}{a.confidenza != null ? ` ${a.confidenza}%` : ''}
+                                    </span>
+                                    {a.da_rivedere && (
+                                      <span className="ml-1 text-[9px] font-bold text-amber-600">da rivedere</span>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right font-mono text-dimar-red whitespace-nowrap">
+                                    {a.prezzo != null ? `€ ${Number(a.prezzo).toFixed(2).replace('.', ',')}` : ''}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
@@ -1206,12 +1416,15 @@ export default function VolantiniPage({ onClose }) {
   const [lista, setLista] = useState(null);
   const [errore, setErrore] = useState(null);
   const [apertoId, setApertoId] = useState(null);
+  const [modo, setModo] = useState('singolo');
+  const [coda, setCoda] = useState(null);
 
   const carica = useCallback(async () => {
     try {
       const d = await readJson(await fetch(api('/')));
       setLista(d.volantini);
       setErrore(null);
+      readJson0(api('/coda/stato')).then(setCoda).catch(() => {});
     } catch (err) {
       setErrore(err.message);
       setLista([]);
@@ -1222,7 +1435,7 @@ export default function VolantiniPage({ onClose }) {
 
   // Refresh the list while any analysis is running.
   useEffect(() => {
-    if (!lista?.some((v) => v.stato === 'in_analisi')) return;
+    if (!lista?.some((v) => v.stato === 'in_analisi' || v.stato === 'in_coda')) return;
     const t = setInterval(carica, 6000);
     return () => clearInterval(t);
   }, [lista, carica]);
@@ -1244,11 +1457,35 @@ export default function VolantiniPage({ onClose }) {
       ) : (
         <div className="max-w-6xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
           <div>
+            <div className="inline-flex items-center bg-gray-100 rounded-xl p-1 mb-3 w-full">
+              <button onClick={() => setModo('singolo')}
+                className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg ${modo === 'singolo' ? 'bg-white shadow-sm text-dimar-dark' : 'text-gray-500 hover:text-dimar-dark'}`}>
+                Un volantino
+              </button>
+              <button onClick={() => setModo('bulk')}
+                className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg ${modo === 'bulk' ? 'bg-white shadow-sm text-dimar-dark' : 'text-gray-500 hover:text-dimar-dark'}`}>
+                Import massivo
+              </button>
+            </div>
+
+            {modo === 'singolo' ? (
             <UploadForm
               onDone={(v) => { setApertoId(v.id); carica(); }}
               onError={setErrore}
               onRefresh={carica}
             />
+            ) : (
+            <FormBulk
+              onDone={(d) => {
+                carica();
+                if (d.scartati?.length) {
+                  setErrore(`${d.creati.length} caricati. Scartati ${d.scartati.length}: ` +
+                    d.scartati.map((x) => `${x.file} (${x.motivo})`).join(', '));
+                }
+              }}
+              onError={setErrore}
+            />
+            )}
             {errore && (
               <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-800">
                 {errore}
@@ -1263,6 +1500,16 @@ export default function VolantiniPage({ onClose }) {
                 <BottoneExport url={api('/export')} nome="volantini.xlsx" className="ml-auto" />
               )}
             </div>
+            {coda && (coda.inCorso || coda.inAttesa > 0) && (
+              <div className="mb-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-[11px] text-blue-900 flex items-center gap-2">
+                <div className="w-3.5 h-3.5 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin shrink-0" />
+                <span>
+                  Coda di analisi: in lavorazione <strong>#{coda.inCorso}</strong>
+                  {coda.inAttesa > 0 && <> · <strong>{coda.inAttesa}</strong> in attesa</>}
+                  {' '}— i volantini vengono analizzati uno alla volta.
+                </span>
+              </div>
+            )}
             {lista === null && <p className="text-sm text-gray-400">Caricamento…</p>}
             {lista?.length === 0 && !errore && (
               <p className="text-sm text-gray-400 py-10 text-center border border-dashed border-gray-200 rounded-xl">

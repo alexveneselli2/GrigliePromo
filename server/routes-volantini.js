@@ -9,6 +9,8 @@ import multer from 'multer';
 import { query, hasDb, messaggioErrore } from './db.js';
 import { analizzaVolantino, riepilogo, contaPagine, riclassifica } from './volantini.js';
 import { esportaLista, esportaVolantini, TIPI_EXPORT } from './export-xlsx.js';
+import { salvaFile, leggiFile, eliminaFile } from './file-store.js';
+import { accoda, statoCoda } from './coda.js';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 function inviaXlsx(res, { buffer, filename }) {
@@ -22,34 +24,9 @@ function inviaXlsx(res, { buffer, filename }) {
 // Every column of `volantini` EXCEPT file_dati, which holds the raw PDF and
 // must never be dragged into list/detail responses.
 const COLONNE_VOLANTINO = `id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
-   pagine, stato, errore, modello, creato_il, completato_il,
+   pagine, stato, errore, modello, tentativi, creato_il, completato_il,
    fase, progresso_fatto, progresso_totale, aggiornato_il,
    (EXISTS (SELECT 1 FROM volantino_file_chunk c WHERE c.volantino_id = volantini.id)) AS ha_file`;
-
-// A single INSERT carrying tens of MB kills the free-tier Postgres, so the PDF
-// is written a chunk at a time. 256 KB keeps each statement comfortably small.
-const CHUNK_BYTE = 256 * 1024;
-
-async function salvaFile(volantinoId, buffer) {
-  await query('DELETE FROM volantino_file_chunk WHERE volantino_id = $1', [volantinoId]);
-  let seq = 0;
-  for (let off = 0; off < buffer.length; off += CHUNK_BYTE) {
-    await query(
-      'INSERT INTO volantino_file_chunk (volantino_id, seq, dati) VALUES ($1,$2,$3)',
-      [volantinoId, seq++, buffer.subarray(off, Math.min(off + CHUNK_BYTE, buffer.length))]
-    );
-  }
-  return seq;
-}
-
-async function leggiFile(volantinoId) {
-  const r = await query(
-    'SELECT dati FROM volantino_file_chunk WHERE volantino_id = $1 ORDER BY seq',
-    [volantinoId]
-  );
-  if (r.rows.length === 0) return null;
-  return Buffer.concat(r.rows.map((x) => x.dati));
-}
 
 const CANALI_VALIDI = ['Mercatò', 'Mercatò Local', 'Mercatò Big', 'Mercatò Extra'];
 
@@ -327,25 +304,85 @@ export default function volantiniRouter() {
       res.status(202).json({ volantino });
 
       const buf = req.file.buffer;
-
-      // Store the PDF chunk by chunk, then analyse. Failing to store it is not
-      // fatal: the analysis still runs, only re-analysis needs a fresh upload.
+      // Store the PDF, then hand the id to the serial queue. Failing to store
+      // it is fatal here: the queue reads the file back when its turn comes.
       salvaFile(volantino.id, buf)
-        .then((n) => console.log(`[volantini] #${volantino.id} PDF salvato in ${n} blocchi`))
-        .catch((err) => console.error(`[volantini] #${volantino.id} PDF non salvato:`, err?.message || err))
-        .finally(() => {
-      analizzaVolantino(volantino.id, buf)
-        .then((r) => console.log(`[volantini] #${volantino.id} completato: ${r.pagine} pagine, ${r.articoli} articoli`))
+        .then(() => accoda(volantino.id))
         .catch(async (err) => {
-          console.error(`[volantini] #${volantino.id} errore:`, err?.message || err);
+          console.error(`[volantini] #${volantino.id} PDF non salvato:`, err?.message || err);
           try {
             await query(`UPDATE volantini SET stato = 'errore', errore = $1 WHERE id = $2`,
-              [String(err?.message || err).slice(0, 500), volantino.id]);
+              ['Salvataggio del PDF non riuscito: ' + String(err?.message || err).slice(0, 300), volantino.id]);
           } catch { /* best effort */ }
-        });
         });
     } catch (err) { next(err); }
   });
+
+  // ---- bulk import: many flyers, analysed one at a time ------------------
+  router.post('/bulk', upload.array('pdf', 30), async (req, res, next) => {
+    try {
+      const files = req.files || [];
+      if (files.length === 0) return res.status(400).json({ error: 'Nessun PDF caricato.' });
+
+      const { mese, anno, nota } = req.body || {};
+      let canali = req.body.canali;
+      if (typeof canali === 'string') {
+        try { canali = JSON.parse(canali); } catch { canali = [canali]; }
+      }
+      canali = Array.isArray(canali) ? canali : [];
+      const progressivoDa = Number(req.body.progressivoDa || 1);
+
+      const errori = [];
+      if (!(Number(mese) >= 1 && Number(mese) <= 12)) errori.push('mese');
+      if (!(Number(anno) >= 2000 && Number(anno) <= 2100)) errori.push('anno');
+      if (canali.length === 0) errori.push('canali');
+      const nv = canali.filter((c) => !CANALI_VALIDI.includes(c));
+      if (nv.length) errori.push(`canali non validi: ${nv.join(', ')}`);
+      if (!Number.isInteger(progressivoDa)) errori.push('progressivoDa');
+      if (errori.length) {
+        return res.status(400).json({ error: `Campi mancanti o non validi: ${errori.join(', ')}` });
+      }
+
+      // Create every row first so the client gets the full list back at once;
+      // the queue then works through them strictly one at a time.
+      const creati = [];
+      const scartati = [];
+      let prog = progressivoDa;
+      for (const f of files) {
+        let pagine = 0;
+        try {
+          pagine = await contaPagine(f.buffer);
+        } catch {
+          scartati.push({ file: f.originalname, motivo: 'PDF non leggibile' });
+          continue;
+        }
+        // The file name, minus extension, is the most useful default name.
+        const nome = f.originalname.replace(/\.pdf$/i, '').trim() || `Volantino ${prog}`;
+        const ins = await query(
+          `INSERT INTO volantini (nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes, pagine, stato)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'in_coda')
+           RETURNING ${COLONNE_VOLANTINO}`,
+          [nome, canali, Number(mese), Number(anno), prog++, nota ? String(nota) : '',
+           f.originalname, f.size, pagine]
+        );
+        creati.push(ins.rows[0]);
+        try {
+          await salvaFile(ins.rows[0].id, f.buffer);
+        } catch (err) {
+          scartati.push({ file: f.originalname, motivo: 'Salvataggio del PDF non riuscito' });
+          await query(`UPDATE volantini SET stato='errore', errore=$1 WHERE id=$2`,
+            ['Salvataggio del PDF non riuscito.', ins.rows[0].id]);
+          continue;
+        }
+        await accoda(ins.rows[0].id);
+      }
+
+      res.status(202).json({ creati, scartati, coda: statoCoda() });
+    } catch (err) { next(err); }
+  });
+
+  // ---- queue state -------------------------------------------------------
+  router.get('/coda/stato', (_req, res) => res.json(statoCoda()));
 
   // ---- re-run classification only (no vision pass, so cheap) --------------
   // Re-classifying 300+ articles takes minutes and Render drops a connection
@@ -392,22 +429,9 @@ export default function volantiniRouter() {
       // Start from a clean slate: the previous run's articles and zones go.
       await query('DELETE FROM volantino_articoli WHERE volantino_id = $1', [id]);
       await query('DELETE FROM volantino_zone WHERE volantino_id = $1', [id]);
-      await query(
-        `UPDATE volantini SET stato = 'in_analisi', errore = NULL, completato_il = NULL,
-                fase = NULL, progresso_fatto = 0, progresso_totale = 0
-          WHERE id = $1`, [id]
-      );
-      res.status(202).json({ avviata: true });
-
-      analizzaVolantino(id, pdf)
-        .then((out) => console.log(`[volantini] #${id} rianalizzato: ${out.pagine} pagine, ${out.articoli} articoli`))
-        .catch(async (err) => {
-          console.error(`[volantini] #${id} rianalisi fallita:`, err?.message || err);
-          try {
-            await query(`UPDATE volantini SET stato = 'errore', errore = $1 WHERE id = $2`,
-              [String(err?.message || err).slice(0, 500), id]);
-          } catch { /* best effort */ }
-        });
+      await query('UPDATE volantini SET tentativi = 0, completato_il = NULL WHERE id = $1', [id]);
+      await accoda(id);
+      res.status(202).json({ avviata: true, coda: statoCoda() });
     } catch (err) { next(err); }
   });
 
@@ -416,8 +440,7 @@ export default function volantiniRouter() {
     try {
       const esiste = await query('SELECT id FROM volantini WHERE id = $1', [Number(req.params.id)]);
       if (esiste.rows.length === 0) return res.status(404).json({ error: 'Volantino non trovato.' });
-      await query('DELETE FROM volantino_file_chunk WHERE volantino_id = $1', [Number(req.params.id)]);
-      await query('UPDATE volantini SET file_dati = NULL WHERE id = $1', [Number(req.params.id)]);
+      await eliminaFile(Number(req.params.id));
       res.json({ ok: true });
     } catch (err) { next(err); }
   });

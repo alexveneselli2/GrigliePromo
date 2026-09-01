@@ -42,6 +42,7 @@ const ESPORTAZIONI = {
     file: 'articoli-in-evidenza',
     colonne: [
       { header: 'Pagina', key: 'pagina', numero: true, width: 8 },
+      { header: 'Tipo', key: 'tipo_evidenza', width: 10 },
       { header: 'Descrizione', key: 'descrizione', width: 56 },
       { header: 'Marca', key: 'marca', width: 20 },
       { header: 'Prezzo', key: 'prezzo', numero: true, width: 10 },
@@ -49,11 +50,11 @@ const ESPORTAZIONI = {
       { header: 'Famiglia ECR', key: 'famiglia', width: 46 },
       { header: 'Zona fornitore', key: 'zona_fornitore', width: 26 },
     ],
-    sql: `SELECT a.pagina, a.descrizione, a.marca, a.prezzo, a.reparto, a.famiglia,
+    sql: `SELECT a.pagina, a.tipo_evidenza, a.descrizione, a.marca, a.prezzo, a.reparto, a.famiglia,
                  z.fornitore AS zona_fornitore
             FROM volantino_articoli a
             LEFT JOIN volantino_zone z ON z.id = a.zona_id
-           WHERE a.volantino_id = $1 AND a.in_evidenza
+           WHERE a.volantino_id = $1 AND a.tipo_evidenza IS NOT NULL
            ORDER BY a.reparto NULLS LAST, a.famiglia NULLS LAST, a.pagina`,
   },
 
@@ -102,19 +103,69 @@ const ESPORTAZIONI = {
       { header: 'Prezzo', key: 'prezzo', numero: true, width: 10 },
       { header: 'Reparto', key: 'reparto', width: 30 },
       { header: 'Famiglia ECR', key: 'famiglia', width: 46 },
-      { header: 'In evidenza', key: 'in_evidenza', numero: true, width: 12 },
+      { header: 'Tipo evidenza', key: 'tipo_evidenza', width: 14 },
+      { header: 'Fidelity', key: 'fidelity', width: 10 },
       { header: 'Zona fornitore', key: 'zona_fornitore', width: 26 },
       { header: 'Origine', key: 'origine', width: 12 },
       { header: 'Confidenza', key: 'confidenza', numero: true, width: 12 },
       { header: 'Da rivedere', key: 'da_rivedere', numero: true, width: 12 },
     ],
     sql: `SELECT a.pagina, a.descrizione, a.marca, a.prezzo, a.reparto, a.famiglia,
-                 a.in_evidenza, z.fornitore AS zona_fornitore,
+                 a.tipo_evidenza, a.fidelity, z.fornitore AS zona_fornitore,
                  a.origine, a.confidenza, a.da_rivedere
             FROM volantino_articoli a
             LEFT JOIN volantino_zone z ON z.id = a.zona_id
            WHERE a.volantino_id = $1
            ORDER BY a.pagina, a.id`,
+  },
+
+  fidelity: {
+    foglio: 'Articoli Fidelity',
+    file: 'articoli-fidelity',
+    colonne: [
+      { header: 'Pagina', key: 'pagina', numero: true, width: 8 },
+      { header: 'Descrizione', key: 'descrizione', width: 56 },
+      { header: 'Marca', key: 'marca', width: 20 },
+      { header: 'Prezzo', key: 'prezzo', numero: true, width: 10 },
+      { header: 'Reparto', key: 'reparto', width: 30 },
+      { header: 'Famiglia ECR', key: 'famiglia', width: 46 },
+      { header: 'Tipo evidenza', key: 'tipo_evidenza', width: 14 },
+    ],
+    sql: `SELECT pagina, descrizione, marca, prezzo, reparto, famiglia, tipo_evidenza
+            FROM volantino_articoli
+           WHERE volantino_id = $1 AND fidelity
+           ORDER BY pagina, id`,
+  },
+
+  pagine: {
+    foglio: 'Per pagina',
+    file: 'per-pagina',
+    colonne: [
+      { header: 'Pagina', key: 'pagina', numero: true, width: 8 },
+      { header: 'Articoli', key: 'articoli', numero: true, width: 10 },
+      { header: 'Cover', key: 'cover', numero: true, width: 8 },
+      { header: 'Faro', key: 'faro', numero: true, width: 8 },
+      { header: 'Doppio', key: 'doppio', numero: true, width: 8 },
+      { header: 'Fidelity', key: 'fidelity', numero: true, width: 10 },
+      { header: 'Zone fornitore', key: 'zone_fornitore', numero: true, width: 14 },
+      { header: 'Articoli in zona', key: 'in_zona_fornitore', numero: true, width: 16 },
+      { header: 'Da rivedere', key: 'da_rivedere', numero: true, width: 12 },
+    ],
+    sql: `SELECT p.pagina,
+                 COUNT(a.id)                                       AS articoli,
+                 COUNT(*) FILTER (WHERE a.tipo_evidenza = 'cover')  AS cover,
+                 COUNT(*) FILTER (WHERE a.tipo_evidenza = 'faro')   AS faro,
+                 COUNT(*) FILTER (WHERE a.tipo_evidenza = 'doppio') AS doppio,
+                 COUNT(*) FILTER (WHERE a.fidelity)                AS fidelity,
+                 COUNT(*) FILTER (WHERE a.zona_id IS NOT NULL)     AS in_zona_fornitore,
+                 COUNT(*) FILTER (WHERE a.da_rivedere)             AS da_rivedere,
+                 (SELECT COUNT(*) FROM volantino_zone z
+                   WHERE z.volantino_id = $1 AND z.pagina = p.pagina) AS zone_fornitore
+            FROM (SELECT DISTINCT pagina FROM volantino_articoli WHERE volantino_id = $1
+                  UNION SELECT DISTINCT pagina FROM volantino_zone WHERE volantino_id = $1) p
+            LEFT JOIN volantino_articoli a ON a.volantino_id = $1 AND a.pagina = p.pagina
+           GROUP BY p.pagina
+           ORDER BY p.pagina`,
   },
 };
 

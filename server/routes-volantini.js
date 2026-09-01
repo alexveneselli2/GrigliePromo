@@ -210,9 +210,13 @@ export default function volantiniRouter() {
     try {
       const soloDaRivedere = req.query.daRivedere === '1';
       const soloInEvidenza = req.query.inEvidenza === '1';
+      const soloFidelity = req.query.fidelity === '1';
+      const pagina = req.query.pagina ? Number(req.query.pagina) : null;
       const filtri = [
         soloDaRivedere ? 'AND a.da_rivedere' : '',
-        soloInEvidenza ? 'AND a.in_evidenza' : '',
+        soloInEvidenza ? 'AND a.tipo_evidenza IS NOT NULL' : '',
+        soloFidelity ? 'AND a.fidelity' : '',
+        Number.isFinite(pagina) && pagina ? `AND a.pagina = ${Number(pagina)}` : '',
       ].join(' ');
       // Highlighted articles read best grouped by category; the review queue
       // reads best worst-first.
@@ -237,14 +241,26 @@ export default function volantiniRouter() {
   // ---- correct one article's classification ------------------------------
   router.patch('/:id/articoli/:articoloId', async (req, res, next) => {
     try {
-      const { reparto, famiglia, inEvidenza, confermato } = req.body || {};
+      const { reparto, famiglia, inEvidenza, tipoEvidenza, fidelity, confermato } = req.body || {};
+      const TIPI = ['cover', 'faro', 'doppio'];
+      if (tipoEvidenza !== undefined && tipoEvidenza !== null && tipoEvidenza !== '' && !TIPI.includes(tipoEvidenza)) {
+        return res.status(400).json({ error: `tipoEvidenza non valido. Ammessi: ${TIPI.join(', ')} oppure vuoto.` });
+      }
       const r = await query(
         `UPDATE volantino_articoli
-            SET reparto     = COALESCE($1, reparto),
-                famiglia    = COALESCE($2, famiglia),
-                in_evidenza = COALESCE($3, in_evidenza),
-                origine     = CASE WHEN $1 IS NOT NULL OR $2 IS NOT NULL THEN 'manuale' ELSE origine END,
-                da_rivedere = CASE WHEN $4 = true THEN false ELSE da_rivedere END
+            SET reparto       = COALESCE($1::text, reparto),
+                famiglia      = COALESCE($2::text, famiglia),
+                -- clearing the type also clears the derived boolean
+                -- Explicit casts: these parameters appear only inside CASE
+                -- branches, where Postgres cannot infer their type on its own
+                -- ("could not determine data type of parameter").
+                tipo_evidenza = CASE WHEN $7::boolean THEN NULLIF($8::text, '') ELSE tipo_evidenza END,
+                in_evidenza   = CASE WHEN $7::boolean THEN NULLIF($8::text, '') IS NOT NULL
+                                     WHEN $3::boolean IS NOT NULL THEN $3::boolean
+                                     ELSE in_evidenza END,
+                fidelity      = COALESCE($9::boolean, fidelity),
+                origine       = CASE WHEN $1::text IS NOT NULL OR $2::text IS NOT NULL THEN 'manuale' ELSE origine END,
+                da_rivedere   = CASE WHEN $4::boolean = true THEN false ELSE da_rivedere END
           WHERE id = $5 AND volantino_id = $6
           RETURNING *`,
         [
@@ -254,6 +270,9 @@ export default function volantiniRouter() {
           confermato === true,
           Number(req.params.articoloId),
           Number(req.params.id),
+          tipoEvidenza !== undefined,
+          tipoEvidenza ?? '',
+          typeof fidelity === 'boolean' ? fidelity : null,
         ]
       );
       if (r.rows.length === 0) return res.status(404).json({ error: 'Articolo non trovato.' });

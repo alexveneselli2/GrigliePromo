@@ -8,6 +8,18 @@ const FASI = {
   classificazione: { breve: 'Classificazione', label: 'Classificazione AI degli articoli senza corrispondenza' },
   salvataggio: { breve: 'Salvataggio', label: 'Salvataggio della catalogazione' },
 };
+// Highlight types, in the order they read on a page.
+const TIPI_EVIDENZA = {
+  cover:  { label: 'Cover',  cls: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  faro:   { label: 'Faro',   cls: 'bg-violet-100 text-violet-700 border-violet-200' },
+  doppio: { label: 'Doppio', cls: 'bg-sky-100 text-sky-700 border-sky-200' },
+};
+function TipoBadge({ tipo }) {
+  const t = TIPI_EVIDENZA[tipo];
+  if (!t) return null;
+  return <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${t.cls}`}>{t.label}</span>;
+}
+
 const ORDINE_FASI = ['estrazione', 'catalogo', 'classificazione', 'salvataggio'];
 function statoFase(k, corrente) {
   if (!corrente) return 'attesa';
@@ -43,6 +55,7 @@ function StatCard({ label, value, sub, tone = 'slate' }) {
     violet: 'bg-violet-50 border-violet-200 text-violet-700',
     amber: 'bg-amber-50 border-amber-200 text-amber-700',
     emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
   };
   return (
     <div className={`rounded-xl border p-4 shadow-sm ${tones[tone]}`}>
@@ -458,6 +471,7 @@ function Dettaglio({ id, onBack }) {
   const [data, setData] = useState(null);
   const [daRivedere, setDaRivedere] = useState([]);
   const [inEvidenza, setInEvidenza] = useState([]);
+  const [fidelity, setFidelity] = useState([]);
   const [errore, setErrore] = useState(null);
   const [tab, setTab] = useState('riepilogo');
   const [tassonomia, setTassonomia] = useState(null);
@@ -476,12 +490,14 @@ function Dettaglio({ id, onBack }) {
       const d = await readJson(await fetch(api(`/${id}`)));
       setData(d);
       if (d.volantino.stato === 'completato') {
-        const [rev, ev] = await Promise.all([
+        const [rev, ev, fid] = await Promise.all([
           readJson(await fetch(api(`/${id}/articoli?daRivedere=1`))),
           readJson(await fetch(api(`/${id}/articoli?inEvidenza=1`))),
+          readJson(await fetch(api(`/${id}/articoli?fidelity=1`))),
         ]);
         setDaRivedere(rev.articoli);
         setInEvidenza(ev.articoli);
+        setFidelity(fid.articoli);
       }
     } catch (err) { setErrore(err.message); }
   }, [id]);
@@ -553,11 +569,21 @@ function Dettaglio({ id, onBack }) {
     carica();
   };
 
+  const togliFidelity = async (articoloId) => {
+    await readJson(await fetch(api(`/${id}/articoli/${articoloId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fidelity: false }),
+    }));
+    setFidelity((prev) => prev.filter((a) => a.id !== articoloId));
+    carica();
+  };
+
   const togliEvidenza = async (articoloId) => {
     await readJson(await fetch(api(`/${id}/articoli/${articoloId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inEvidenza: false }),
+      body: JSON.stringify({ tipoEvidenza: '' }),
     }));
     setInEvidenza((prev) => prev.filter((a) => a.id !== articoloId));
     carica();
@@ -607,11 +633,13 @@ function Dettaglio({ id, onBack }) {
     for (const a of inEvidenza) {
       const key = raggruppa === 'pagina' ? `p${a.pagina}`
         : raggruppa === 'reparto' ? (a.reparto || '')
+        : raggruppa === 'tipo' ? (a.tipo_evidenza || '')
         : `${a.reparto || ''}||${a.famiglia || ''}`;
       const cur = map.get(key) || {
         key,
         titolo: raggruppa === 'pagina' ? `Pagina ${a.pagina}`
           : raggruppa === 'reparto' ? (a.reparto || 'senza reparto')
+          : raggruppa === 'tipo' ? (TIPI_EVIDENZA[a.tipo_evidenza]?.label || 'senza tipo')
           : (a.famiglia || 'non classificata'),
         sopratitolo: raggruppa === 'famiglia' ? (a.reparto || 'senza reparto') : null,
         pagina: a.pagina,
@@ -769,7 +797,9 @@ function Dettaglio({ id, onBack }) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <StatCard label="Pagine" value={v.pagine} />
         <StatCard label="Articoli" value={t.articoli} tone="red" />
-        <StatCard label="In evidenza" value={t.in_evidenza} tone="violet" />
+        <StatCard label="In evidenza" value={t.in_evidenza} tone="violet"
+          sub={`${t.cover || 0} cover · ${t.faro || 0} faro · ${t.doppio || 0} doppio`} />
+        <StatCard label="Fidelity" value={t.fidelity || 0} tone="blue" />
         <StatCard label="Zone fornitore" value={data.zone.length} tone="emerald"
           sub={`${t.in_zona_fornitore} articoli dentro`} />
         <StatCard label="Da rivedere" value={t.da_rivedere} tone="amber" />
@@ -779,7 +809,9 @@ function Dettaglio({ id, onBack }) {
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {[
           ['riepilogo', 'Per reparto e famiglia'],
+          ['pagine', `Per pagina (${(data.perPagina || []).length})`],
           ['evidenza', `In evidenza (${t.in_evidenza})`],
+          ['fidelity', `Fidelity (${t.fidelity || 0})`],
           ['zone', `Zone fornitore (${data.zone.length})`],
           ['rivedere', `Da rivedere (${daRivedere.length})`],
         ].map(([k, label]) => (
@@ -889,15 +921,16 @@ function Dettaglio({ id, onBack }) {
       {tab === 'evidenza' && (
         <div className="space-y-3">
           <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5 text-[11px] text-violet-900">
-            Articoli che occupano uno spazio più grande degli altri della stessa pagina.
-            Se uno non è davvero in evidenza, toglilo con "×".
+            <strong>Cover</strong> = prima pagina · <strong>Faro</strong> = più grande e con grafica
+            propria (fondo o pannello colorato) · <strong>Doppio</strong> = solo più grande, stesso
+            fondo bianco. Se uno non è davvero in evidenza, toglilo con "×".
           </div>
 
           {inEvidenza.length > 0 && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Raggruppa per:</span>
               <div className="inline-flex items-center bg-gray-100 rounded-lg p-0.5">
-                {[['famiglia', 'Famiglia'], ['reparto', 'Reparto'], ['pagina', 'Pagina']].map(([k, label]) => (
+                {[['famiglia', 'Famiglia'], ['reparto', 'Reparto'], ['pagina', 'Pagina'], ['tipo', 'Tipo']].map(([k, label]) => (
                   <button
                     key={k}
                     onClick={() => setRaggruppa(k)}
@@ -937,6 +970,9 @@ function Dettaglio({ id, onBack }) {
                     {g.items.map((a) => (
                       <tr key={a.id} className="border-b border-gray-50 hover:bg-violet-50/30">
                         <td className="px-4 py-1.5 text-gray-400 tabular-nums w-12">p.{a.pagina}</td>
+                        <td className="px-1 py-1.5 w-16">
+                          {raggruppa !== 'tipo' && <TipoBadge tipo={a.tipo_evidenza} />}
+                        </td>
                         <td className="px-2 py-1.5 text-gray-800">{a.descrizione}</td>
                         {/* The family is the group header when grouping by it;
                             otherwise it still needs to be visible per row. */}
@@ -973,6 +1009,112 @@ function Dettaglio({ id, onBack }) {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {tab === 'pagine' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500">
+              Composizione di ogni pagina del volantino.
+            </span>
+            <BottoneExport url={api(`/${id}/export?tipo=pagine`)} nome="per-pagina.xlsx" className="ml-auto" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                  <th className="text-left px-4 py-2 font-bold">Pag.</th>
+                  <th className="text-right px-3 py-2 font-bold">Articoli</th>
+                  <th className="text-right px-3 py-2 font-bold text-indigo-600">Cover</th>
+                  <th className="text-right px-3 py-2 font-bold text-violet-600">Faro</th>
+                  <th className="text-right px-3 py-2 font-bold text-sky-600">Doppio</th>
+                  <th className="text-right px-3 py-2 font-bold text-blue-600">Fidelity</th>
+                  <th className="text-right px-3 py-2 font-bold text-emerald-600">Zone forn.</th>
+                  <th className="text-right px-3 py-2 font-bold text-emerald-600">Art. in zona</th>
+                  <th className="text-right px-4 py-2 font-bold text-amber-600">Da rivedere</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.perPagina || []).map((p) => (
+                  <tr key={p.pagina} className="border-b border-gray-50 hover:bg-red-50/20">
+                    <td className="px-4 py-1.5 font-bold text-dimar-dark tabular-nums">{p.pagina}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-bold">{p.articoli}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-indigo-600">{Number(p.cover) || ''}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-violet-600">{Number(p.faro) || ''}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-sky-600">{Number(p.doppio) || ''}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-blue-600">{Number(p.fidelity) || ''}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{Number(p.zone_fornitore) || ''}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-emerald-600">{Number(p.in_zona_fornitore) || ''}</td>
+                    <td className="px-4 py-1.5 text-right font-mono text-amber-600">{Number(p.da_rivedere) || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                  <td className="px-4 py-2">Totale</td>
+                  <td className="px-3 py-2 text-right font-mono">{t.articoli}</td>
+                  <td className="px-3 py-2 text-right font-mono text-indigo-600">{t.cover || 0}</td>
+                  <td className="px-3 py-2 text-right font-mono text-violet-600">{t.faro || 0}</td>
+                  <td className="px-3 py-2 text-right font-mono text-sky-600">{t.doppio || 0}</td>
+                  <td className="px-3 py-2 text-right font-mono text-blue-600">{t.fidelity || 0}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{data.zone.length}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{t.in_zona_fornitore}</td>
+                  <td className="px-4 py-2 text-right font-mono text-amber-600">{t.da_rivedere}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'fidelity' && (
+        <div className="space-y-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-[11px] text-blue-900 flex items-center gap-3">
+            <span className="flex-1">
+              Articoli riservati ai titolari della carta fedeltà: bollino Fidelity accanto al prezzo
+              o pagina dedicata. Sono tracciati a parte dagli articoli in evidenza.
+            </span>
+            <BottoneExport url={api(`/${id}/export?tipo=fidelity`)} nome="fidelity.xlsx" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            {fidelity.length === 0 ? (
+              <p className="text-center text-sm text-gray-400 py-10">Nessun articolo Fidelity rilevato.</p>
+            ) : (
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                    <th className="text-left px-4 py-2 font-bold">Pag.</th>
+                    <th className="text-left px-2 py-2 font-bold">Articolo</th>
+                    <th className="text-left px-2 py-2 font-bold">Famiglia ECR</th>
+                    <th className="text-right px-2 py-2 font-bold">Prezzo</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {fidelity.map((a) => (
+                    <tr key={a.id} className="border-b border-gray-50 hover:bg-blue-50/30">
+                      <td className="px-4 py-1.5 text-gray-400 tabular-nums">p.{a.pagina}</td>
+                      <td className="px-2 py-1.5 text-gray-800">
+                        {a.descrizione}
+                        {a.tipo_evidenza && <span className="ml-1.5"><TipoBadge tipo={a.tipo_evidenza} /></span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-gray-500 max-w-[220px] truncate" title={`${a.reparto || ''} / ${a.famiglia || ''}`}>
+                        {a.famiglia || <span className="text-gray-300">non classificata</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-dimar-red whitespace-nowrap">
+                        {a.prezzo != null ? `€ ${Number(a.prezzo).toFixed(2).replace('.', ',')}` : ''}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button onClick={() => togliFidelity(a.id)} title="Non è un articolo Fidelity"
+                          className="text-gray-300 hover:text-red-500 font-bold">×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 

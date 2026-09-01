@@ -37,7 +37,8 @@ const ArticoloSchema = z.object({
   descrizione: z.string().describe('Testo del prodotto come stampato sul volantino, il piu\' fedele possibile (marca + descrizione + formato).'),
   marca: z.string().describe('Marca commerciale se leggibile, altrimenti stringa vuota.'),
   prezzo: z.number().describe('Prezzo promozionale in euro. 0 se non leggibile.'),
-  inEvidenza: z.boolean().describe('true se questo articolo occupa uno spazio visibilmente PIU\' GRANDE degli altri della stessa pagina (vetrina, taglio prezzo in grande, box doppio). false per gli articoli di taglio standard.'),
+  tipoEvidenza: z.string().describe('"faro" | "doppio" | "" (vuoto). Vedi le regole nel system prompt: "faro" = piu\' grande E con grafica propria (fondo/pannello colorato che lo stacca dalla griglia); "doppio" = solo piu\' grande, stesso fondo bianco degli altri; "" = articolo di taglio standard. NON usare "cover": la prima pagina viene marcata automaticamente.'),
+  fidelity: z.boolean().describe('true se l\'articolo e\' riservato ai titolari della carta fedelta\': porta il bollino/logo Fidelity Card accanto al prezzo, oppure si trova in una pagina o sezione dedicata alla carta fedelta\'.'),
   zonaFornitore: z.string().describe('Se l\'articolo si trova dentro un\'area con grafica gestita dal fornitore, riporta qui il nome identificativo di quella zona (lo stesso usato in zoneFornitore). Stringa vuota se e\' nel layout standard del volantino.'),
 });
 
@@ -64,7 +65,21 @@ Ricevi alcune pagine di un volantino in PDF. Per OGNI pagina devi restituire:
 
 1. ARTICOLI — ogni singolo prodotto in promozione presente sulla pagina, con la descrizione cosi' come e' stampata (marca, denominazione, formato/grammatura), il prezzo promozionale e la marca.
 
-2. IN EVIDENZA — per ogni articolo indica se occupa uno spazio VISIBILMENTE PIU' GRANDE rispetto agli altri articoli della stessa pagina. I volantini hanno un taglio standard ripetuto (celle di dimensione simile); gli articoli "in evidenza" rompono quella griglia: box doppio o triplo, immagine grande, prezzo cubitale, posizione di apertura pagina. Confronta SEMPRE con gli altri articoli della stessa pagina: e' una valutazione relativa, non assoluta. Se in una pagina tutti gli articoli hanno la stessa dimensione, nessuno e' in evidenza.
+2. TIPO DI EVIDENZA — il volantino ha un taglio standard ripetuto (celle simili, packshot su fondo bianco). Alcuni articoli rompono quella griglia, e vanno distinti in DUE tipi. La differenza e' sottile ma precisa, e sta nel FONDO, non nella dimensione:
+
+   - "faro" = e' piu' grande E ha un TRATTAMENTO GRAFICO PROPRIO che lo isola dalla griglia: un pannello o una diagonale di colore pieno dietro il prodotto, un fondo diverso dal bianco della pagina, una cornice dedicata. Il prodotto "galleggia" su una sua superficie colorata.
+   - "doppio" = occupa piu' spazio del taglio standard (circa due celle), ma sta sullo STESSO FONDO BIANCO di tutti gli altri articoli, senza pannello ne' diagonale colorata dietro. E' solo piu' grande.
+   - "" (stringa vuota) = articolo di taglio standard.
+
+   Esempi reali da questo tipo di volantino:
+   - un latte con dietro una diagonale gialla piena e cornice blu -> "faro"
+   - un caffe' grande, ben piu' grande degli altri, ma appoggiato sul fondo bianco della pagina come tutti -> "doppio"
+   - in una pagina di salumi: il prosciutto in alto a sinistra su un pannello di colore pieno -> "faro"; il prosciutto in alto a destra, altrettanto grande ma sul fondo bianco -> "doppio"
+
+   Quindi: prima chiediti "e' piu' grande del taglio standard?" — se no, lascia "". Se si', guarda COSA C'E' DIETRO: fondo colorato/pannello = "faro", fondo bianco come gli altri = "doppio".
+   Non usare mai "cover": la prima pagina viene marcata automaticamente a valle.
+
+2-bis. FIDELITY — segna fidelity=true per gli articoli riservati ai titolari della carta fedelta': portano un bollino/logo "Fidelity Card" accanto al prezzo o al prodotto, oppure si trovano in una pagina o sezione interamente dedicata alla carta fedelta' (intestata "Fidelity", "Convenienza riservata a te" o simili). Un articolo Fidelity puo' essere anche in evidenza: i due dati sono indipendenti.
 
 3. ZONE FORNITORE — aree in cui e' il FORNITORE a fornire la grafica, comprata come spazio pubblicitario. Sono rare: in un volantino tipico se ne contano poche unita', non una per pagina.
 
@@ -75,7 +90,7 @@ Ricevi alcune pagine di un volantino in PDF. Per OGNI pagina devi restituire:
    - palette di colori della marca, estranea a quella del volantino;
    - una composizione interna propria, che di norma presenta PIU' prodotti disposti a modo suo.
 
-   ATTENZIONE — l'errore piu' frequente e' scambiare per zona fornitore il modo in cui IL VOLANTINO STESSO mette in risalto un articolo. Il volantino ha un suo trattamento di evidenza ricorrente (cornice colorata, fondo/diagonale a tinta, packshot ingrandito, prezzo cubitale, box che rompe la griglia): quello NON e' una zona fornitore, e' semplicemente un articolo in evidenza. Se vedi un box piu' grande con la cornice e i colori usati anche altrove nel volantino, e dentro c'e' UN SOLO prodotto col suo packshot e il suo prezzo, allora quell'articolo va marcato inEvidenza=true e il suo zonaFornitore va lasciato VUOTO.
+   ATTENZIONE — l'errore piu' frequente e' scambiare per zona fornitore il modo in cui IL VOLANTINO STESSO mette in risalto un articolo. Il volantino ha un suo trattamento di evidenza ricorrente (cornice colorata, fondo/diagonale a tinta, packshot ingrandito, prezzo cubitale, box che rompe la griglia): quello NON e' una zona fornitore, e' semplicemente un articolo in evidenza. Se vedi un box piu' grande con la cornice e i colori usati anche altrove nel volantino, e dentro c'e' UN SOLO prodotto col suo packshot e il suo prezzo, allora quell'articolo va classificato con tipoEvidenza "faro" o "doppio" e il suo zonaFornitore va lasciato VUOTO.
 
    Non sono zone fornitore nemmeno:
    - i box istituzionali dell'insegna (servizi, spesa online, orari, carta fedelta', concorsi dell'insegna);
@@ -332,6 +347,17 @@ ${vocabolario}`,
 // Orchestration
 // ---------------------------------------------------------------------------
 
+// Page 1 is the cover by definition — no visual judgement needed, so it is
+// decided here rather than asked of the model. Everything else uses the
+// faro/doppio distinction the model returns; anything unrecognised is treated
+// as a standard article.
+const TIPI_EVIDENZA = new Set(['faro', 'doppio']);
+function tipoEvidenza(art) {
+  if (art.pagina === 1) return 'cover';
+  const t = String(art.tipoEvidenza || '').trim().toLowerCase();
+  return TIPI_EVIDENZA.has(t) ? t : null;
+}
+
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -448,8 +474,8 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
       await c.query(
         `INSERT INTO volantino_articoli
            (volantino_id, pagina, descrizione, marca, prezzo, reparto, gruppo, settore, famiglia,
-            origine, confidenza, da_rivedere, in_evidenza, zona_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+            origine, confidenza, da_rivedere, in_evidenza, tipo_evidenza, fidelity, zona_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [
           volantinoId,
           art.pagina,
@@ -465,7 +491,9 @@ export async function analizzaVolantino(volantinoId, pdfBuffer) {
           // AI-classified rows always need a check; catalogue matches only when
           // the similarity was not strong enough to stand on its own.
           cls ? cls.daRivedere !== false : true,
-          !!art.inEvidenza,
+          !!tipoEvidenza(art),
+          tipoEvidenza(art),
+          !!art.fidelity,
           zonaId,
         ]
       );
@@ -552,7 +580,7 @@ export async function riclassifica(volantinoId) {
 // ---------------------------------------------------------------------------
 
 export async function riepilogo(volantinoId) {
-  const [testata, perFamiglia, zone, totali] = await Promise.all([
+  const [testata, perFamiglia, zone, totali, perPagina] = await Promise.all([
     query(`SELECT id, nome, canali, mese, anno, progressivo, nota, file_nome, file_bytes,
    pagine, stato, errore, modello, creato_il, completato_il,
    fase, progresso_fatto, progresso_totale, aggiornato_il,
@@ -580,11 +608,36 @@ export async function riepilogo(volantinoId) {
       [volantinoId]
     ),
     query(
-      `SELECT COUNT(*)                                    AS articoli,
-              COUNT(*) FILTER (WHERE in_evidenza)         AS in_evidenza,
-              COUNT(*) FILTER (WHERE zona_id IS NOT NULL) AS in_zona_fornitore,
-              COUNT(*) FILTER (WHERE da_rivedere)         AS da_rivedere
+      `SELECT COUNT(*)                                        AS articoli,
+              COUNT(*) FILTER (WHERE in_evidenza)             AS in_evidenza,
+              COUNT(*) FILTER (WHERE tipo_evidenza = 'cover')  AS cover,
+              COUNT(*) FILTER (WHERE tipo_evidenza = 'faro')   AS faro,
+              COUNT(*) FILTER (WHERE tipo_evidenza = 'doppio') AS doppio,
+              COUNT(*) FILTER (WHERE fidelity)                AS fidelity,
+              COUNT(*) FILTER (WHERE zona_id IS NOT NULL)     AS in_zona_fornitore,
+              COUNT(*) FILTER (WHERE da_rivedere)             AS da_rivedere
          FROM volantino_articoli WHERE volantino_id = $1`,
+      [volantinoId]
+    ),
+    // One row per page that has anything on it, so the flyer can be read
+    // page by page alongside the printed copy.
+    query(
+      `SELECT p.pagina,
+              COUNT(a.id)                                       AS articoli,
+              COUNT(*) FILTER (WHERE a.tipo_evidenza = 'cover')  AS cover,
+              COUNT(*) FILTER (WHERE a.tipo_evidenza = 'faro')   AS faro,
+              COUNT(*) FILTER (WHERE a.tipo_evidenza = 'doppio') AS doppio,
+              COUNT(*) FILTER (WHERE a.fidelity)                AS fidelity,
+              COUNT(*) FILTER (WHERE a.zona_id IS NOT NULL)     AS in_zona_fornitore,
+              COUNT(*) FILTER (WHERE a.da_rivedere)             AS da_rivedere,
+              (SELECT COUNT(*) FROM volantino_zone z
+                WHERE z.volantino_id = $1 AND z.pagina = p.pagina) AS zone_fornitore
+         FROM (SELECT DISTINCT pagina FROM volantino_articoli WHERE volantino_id = $1
+               UNION SELECT DISTINCT pagina FROM volantino_zone WHERE volantino_id = $1) p
+         LEFT JOIN volantino_articoli a
+                ON a.volantino_id = $1 AND a.pagina = p.pagina
+        GROUP BY p.pagina
+        ORDER BY p.pagina`,
       [volantinoId]
     ),
   ]);
@@ -595,5 +648,6 @@ export async function riepilogo(volantinoId) {
     totali: totali.rows[0],
     perFamiglia: perFamiglia.rows,
     zone: zone.rows,
+    perPagina: perPagina.rows,
   };
 }

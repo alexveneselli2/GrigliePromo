@@ -224,6 +224,15 @@ ALTER TABLE volantini ADD COLUMN IF NOT EXISTS aggiornato_il TIMESTAMPTZ;
 -- blip. file_dati is left in place for the (empty) legacy path and unused.
 ALTER TABLE volantini ADD COLUMN IF NOT EXISTS file_dati BYTEA;
 
+-- Highlight type: 'cover' (page 1), 'faro' (bigger AND with its own graphic
+-- treatment) or 'doppio' (merely bigger, same white background). in_evidenza
+-- stays as the derived boolean so existing queries keep working.
+ALTER TABLE volantino_articoli ADD COLUMN IF NOT EXISTS tipo_evidenza TEXT;
+-- Loyalty-card articles: tracked separately from highlights, never mixed in.
+ALTER TABLE volantino_articoli ADD COLUMN IF NOT EXISTS fidelity BOOLEAN NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_art_fidelity ON volantino_articoli(volantino_id) WHERE fidelity;
+
 CREATE TABLE IF NOT EXISTS volantino_file_chunk (
   volantino_id INTEGER NOT NULL REFERENCES volantini(id) ON DELETE CASCADE,
   seq          INTEGER NOT NULL,
